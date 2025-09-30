@@ -159,32 +159,187 @@ function calculatePayoff(p1Choice: Choice, p2Choice: Choice): {
 ## Game Flow Diagrams
 
 ### High-Level Flow
+
 ```
-[Landing Page]
-     ↓
-[Game Setup] → Player 1 makes choice → [URL Generated]
-     ↓
-Player 2 clicks URL
-     ↓
-[Game Setup] → Player 2 makes choice
-     ↓
-[Round 1 Results Shown]
-     ↓
-Player 2 makes Round 2 choice → [URL Generated]
-     ↓
-Player 1 clicks URL
-     ↓
-[Round 1-2 Results Shown]
-     ↓
-Player 1 makes Round 3 choice → [URL Generated]
-     ↓
-[Continue alternating...]
-     ↓
-[Round 5 Complete]
-     ↓
-[Final Results] + [Optional Message] + [Rematch Offer]
-     ↓
-[New Game Started] (optional)
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 1'S BROWSER                                      │
+├─────────────────────────────────────────────────────────┤
+│ [Landing Page]                                          │
+│    ↓                                                    │
+│ [Sees Story + Payoff Matrix]                           │
+│    ↓                                                    │
+│ Makes Round 1 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 2         │
+└─────────────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 2'S BROWSER                                      │
+├─────────────────────────────────────────────────────────┤
+│ Clicks URL from Player 1                               │
+│    ↓                                                    │
+│ [Sees Story + Payoff Matrix]                           │
+│    ↓                                                    │
+│ Makes Round 1 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ 🎉 [ROUND 1 RESULTS REVEALED]                          │
+│    • Shows: What P1 chose, What P2 chose              │
+│    • Shows: P1 gold earned, P2 gold earned            │
+│    • Shows: Running totals                             │
+│    ↓                                                    │
+│ Makes Round 2 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 1         │
+└─────────────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 1'S BROWSER                                      │
+├─────────────────────────────────────────────────────────┤
+│ Clicks URL from Player 2                               │
+│    ↓                                                    │
+│ [SEES ROUND 1 RESULTS]                                 │
+│    • What each player chose                            │
+│    • Gold earned by each                               │
+│    ↓                                                    │
+│ Makes Round 2 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ 🎉 [ROUND 2 RESULTS REVEALED]                          │
+│    • Shows: What P1 chose, What P2 chose              │
+│    • Shows: P1 gold earned, P2 gold earned            │
+│    • Shows: Running totals (Rounds 1+2)                │
+│    ↓                                                    │
+│ Makes Round 3 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 2         │
+└─────────────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 2'S BROWSER                                      │
+├─────────────────────────────────────────────────────────┤
+│ Clicks URL from Player 1                               │
+│    ↓                                                    │
+│ [SEES ROUNDS 1-2 RESULTS]                              │
+│    • Complete history of both rounds                   │
+│    • Running totals                                    │
+│    ↓                                                    │
+│ Makes Round 3 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ 🎉 [ROUND 3 RESULTS REVEALED]                          │
+│    ↓                                                    │
+│ Makes Round 4 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 1         │
+└─────────────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 1'S BROWSER                                      │
+├─────────────────────────────────────────────────────────┤
+│ Clicks URL from Player 2                               │
+│    ↓                                                    │
+│ [SEES ROUNDS 1-3 RESULTS]                              │
+│    ↓                                                    │
+│ Makes Round 4 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ 🎉 [ROUND 4 RESULTS REVEALED]                          │
+│    ↓                                                    │
+│ Makes Round 5 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 2         │
+└─────────────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 2'S BROWSER                                      │
+├─────────────────────────────────────────────────────────┤
+│ Clicks URL from Player 1                               │
+│    ↓                                                    │
+│ [SEES ROUNDS 1-4 RESULTS]                              │
+│    ↓                                                    │
+│ Makes Round 5 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ 🎉 [ROUND 5 RESULTS REVEALED - GAME COMPLETE!]         │
+│    • Complete game history (all 5 rounds)              │
+│    • Final gold totals                                 │
+│    • Winner declared                                   │
+│    ↓                                                    │
+│ [Optional: Add message for Player 1]                   │
+│    ↓                                                    │
+│ [Optional: Offer Rematch]                              │
+│    • "Want to play again?"                             │
+│    • "Start Rematch" button                            │
+│    ↓                                                    │
+│ IF REMATCH: Makes NEW GAME Round 1 Choice              │
+│    • Player 2 becomes Player 1 in new game             │
+│    • Player 1 becomes Player 2 in new game             │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 1         │
+└─────────────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────────────┐
+│ PLAYER 1'S BROWSER (receiving rematch)                 │
+├─────────────────────────────────────────────────────────┤
+│ Clicks URL from Player 2                               │
+│    ↓                                                    │
+│ [SEES COMPLETE PREVIOUS GAME RESULTS]                  │
+│    • All 5 rounds from finished game                   │
+│    • Final totals from finished game                   │
+│    • Player 2's message                                │
+│    ↓                                                    │
+│ [Sees "Player 2 wants a rematch!"]                     │
+│    • Shows: "They've made their first choice"          │
+│    • Shows: Link to previous game history              │
+│    ↓                                                    │
+│ [NEW GAME - Round 1 Choice]                            │
+│    • Now Player 1 is Player 2 in rematch               │
+│    • Now Player 2 is Player 1 in rematch               │
+│    ↓                                                    │
+│ Makes Round 1 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ 🎉 [NEW GAME ROUND 1 RESULTS REVEALED]                 │
+│    • Shows what each chose                             │
+│    • Fresh gold totals                                 │
+│    ↓                                                    │
+│ Makes Round 2 Choice (Silent/Talk)                     │
+│    ↓                                                    │
+│ [URL Generated] → Copies and sends to Player 2         │
+│    • New game continues with roles swapped...          │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Key Flow Principles
+
+**Results Timing:**
+- Results are ONLY revealed when BOTH players have made their choice for that round
+- The player who makes the SECOND choice for any round immediately sees the results
+- The player who made the FIRST choice sees the results when they return for their NEXT turn
+
+**Mid-Game Turn Pattern (Rounds 2-5):**
+1. **Player opens URL** → Sees history of all completed rounds
+2. **Player makes choice** → Their choice for current round
+3. **Results revealed** → Shows outcome of the round they just completed
+4. **Player makes next choice** → Immediately prompted for next round
+5. **URL generated** → Copy and send to partner
+
+**Example: Player 1's Round 3 Turn**
+```
+Opens URL
+   ↓
+"Here's what happened so far..."
+[Round 1: P1 Silent (0g), P2 Talk (5g)]
+[Round 2: P1 Talk (1g), P2 Talk (1g)]
+Current Totals: You: 1g, Partner: 6g
+   ↓
+"Round 3 - Your Choice?"
+[Silent] [Talk] ← Player clicks Talk
+   ↓
+🎉 "Round 3 Results!"
+You: Talk (5g), Partner: Silent (0g)
+Updated Totals: You: 6g, Partner: 6g
+   ↓
+"Round 4 - Your Choice?"
+[Silent] [Talk] ← Player makes choice
+   ↓
+"Send this URL to your partner!"
+[Copy URL button]
 ```
 
 ### State Transition Diagram
@@ -296,11 +451,12 @@ Generate & Display URL
 
 ### 6. Rematch Received Screen
 **Elements:**
-- Final game results
+- Final game results from previous game
 - Opponent's message displayed
 - "Your opponent wants a rematch!"
+- "They've already made their first move!"
 - "Accept & Start New Game" button
-- Becomes Player 1 in new game chain
+- Note: "You'll be Player 2 in the rematch" (roles swap)
 
 ---
 
@@ -323,7 +479,7 @@ Generate & Display URL
 ```
 ┌──────────────────────────────┐
 │ Round 1: ✓ Complete          │
-│ You: Silent → 3 gold         │
+│ You: Silent → 0 gold         │
 │ Partner: Talk → 5 gold       │
 ├──────────────────────────────┤
 │ Round 2: ✓ Complete          │
