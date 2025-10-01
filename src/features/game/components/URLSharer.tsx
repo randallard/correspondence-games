@@ -57,6 +57,11 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
   const shareableURL = useMemo(() => generateShareableURL(gameState), [gameState]);
 
   /**
+   * Checks if the URL contains localhost (for development testing).
+   */
+  const isLocalhost = useMemo(() => shareableURL.includes('localhost'), [shareableURL]);
+
+  /**
    * Handles the copy button click event.
    *
    * @param event - The mouse click event
@@ -64,6 +69,16 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
   const handleCopy = async (event: MouseEvent<HTMLButtonElement>): Promise<void> => {
     event.preventDefault();
     await copyToClipboard(shareableURL);
+  };
+
+  /**
+   * Handles opening the URL in a new tab (for localhost testing).
+   *
+   * @param event - The mouse click event
+   */
+  const handleOpenInNewTab = (event: MouseEvent<HTMLButtonElement>): void => {
+    event.preventDefault();
+    window.open(shareableURL, '_blank', 'noopener,noreferrer');
   };
 
   /**
@@ -161,6 +176,38 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
   };
 
   /**
+   * Button container styles for arranging buttons side by side.
+   */
+  const buttonContainerStyles: React.CSSProperties = {
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap',
+  };
+
+  /**
+   * Secondary button styles for the "Open in New Tab" button.
+   */
+  const secondaryButtonStyles: React.CSSProperties = {
+    padding: '10px 20px',
+    fontSize: '16px',
+    fontWeight: 600,
+    border: '2px solid #4f46e5',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease-in-out',
+    fontFamily: 'inherit',
+    backgroundColor: '#ffffff',
+    color: '#4f46e5',
+  };
+
+  /**
+   * Hover styles for the secondary button.
+   */
+  const secondaryHoverStyles: React.CSSProperties = {
+    backgroundColor: '#f5f3ff',
+  };
+
+  /**
    * Handles mouse enter event for hover effects.
    *
    * @param event - The mouse event
@@ -182,6 +229,24 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
     }
   };
 
+  /**
+   * Handles mouse enter event for secondary button hover effects.
+   *
+   * @param event - The mouse event
+   */
+  const handleSecondaryMouseEnter = (event: MouseEvent<HTMLButtonElement>): void => {
+    Object.assign(event.currentTarget.style, { ...secondaryButtonStyles, ...secondaryHoverStyles });
+  };
+
+  /**
+   * Handles mouse leave event for secondary button hover effects.
+   *
+   * @param event - The mouse event
+   */
+  const handleSecondaryMouseLeave = (event: MouseEvent<HTMLButtonElement>): void => {
+    Object.assign(event.currentTarget.style, secondaryButtonStyles);
+  };
+
   return (
     <div style={containerStyles} role="region" aria-label="Share game URL">
       <h3 style={headingStyles}>Share Game URL</h3>
@@ -193,16 +258,29 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
       <div style={urlBoxStyles} aria-label="Game URL" role="textbox" aria-readonly="true">
         {shareableURL}
       </div>
-      <button
-        onClick={handleCopy}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        style={buttonStyles}
-        aria-label={isCopied ? 'URL copied to clipboard' : 'Copy game URL to clipboard'}
-        aria-live="polite"
-      >
-        {isCopied ? 'Copied!' : 'Copy URL'}
-      </button>
+      <div style={buttonContainerStyles}>
+        <button
+          onClick={handleCopy}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          style={buttonStyles}
+          aria-label={isCopied ? 'URL copied to clipboard' : 'Copy game URL to clipboard'}
+          aria-live="polite"
+        >
+          {isCopied ? 'Copied!' : 'Copy URL'}
+        </button>
+        {isLocalhost && (
+          <button
+            onClick={handleOpenInNewTab}
+            onMouseEnter={handleSecondaryMouseEnter}
+            onMouseLeave={handleSecondaryMouseLeave}
+            style={secondaryButtonStyles}
+            aria-label="Open game URL in new tab for testing"
+          >
+            Open in New Tab
+          </button>
+        )}
+      </div>
       {isCopied && (
         <div style={successStyles} role="status" aria-live="polite">
           URL copied to clipboard! Share it with your opponent.
