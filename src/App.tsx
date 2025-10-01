@@ -36,19 +36,40 @@ function App(): ReactElement {
   const { urlGameState, isLoading, error: urlError, generateURL } = useURLState();
   const { gameState, initializeGame, makeChoice, resetGame, loadGame } = useGameState();
 
+  // DEBUG: Log state changes
+  useEffect(() => {
+    console.log('=== STATE DEBUG ===');
+    console.log('urlGameState:', urlGameState ? {
+      gameId: urlGameState.gameId,
+      currentRound: urlGameState.currentRound,
+      phase: urlGameState.gamePhase,
+      round: urlGameState.rounds[urlGameState.currentRound],
+    } : null);
+    console.log('gameState:', gameState ? {
+      gameId: gameState.gameId,
+      currentRound: gameState.currentRound,
+      phase: gameState.gamePhase,
+      round: gameState.rounds[gameState.currentRound],
+    } : null);
+    console.log('==================');
+  }, [urlGameState, gameState]);
+
   // Load game from URL on mount
   useEffect(() => {
     if (urlGameState && !gameState) {
+      console.log('🔄 Loading game from URL');
       loadGame(urlGameState);
     }
   }, [urlGameState, gameState, loadGame]);
 
-  // Update URL whenever game state changes
+  // Update URL whenever game state changes (but not on initial load)
   useEffect(() => {
-    if (gameState && gameState.gamePhase !== 'setup') {
+    // Only update URL if we have a game state and it wasn't just loaded from URL
+    if (gameState && gameState.gamePhase !== 'setup' && !urlGameState) {
+      console.log('🔗 Updating browser URL with new state');
       updateURLWithState(gameState);
     }
-  }, [gameState]);
+  }, [gameState, urlGameState]);
 
   // Show loading state while parsing URL
   if (isLoading) {
@@ -144,6 +165,31 @@ function App(): ReactElement {
   const waitingForP1 = !currentRound?.choices.p1;
   const waitingForP2 = !currentRound?.choices.p2;
 
+  // Determine who goes first in this round (alternates)
+  // Round 0,2,4 (Rounds 1,3,5): P1 goes first
+  // Round 1,3 (Rounds 2,4): P2 goes first
+  const isP1FirstRound = gameState.currentRound % 2 === 0;
+  const isP2FirstRound = !isP1FirstRound;
+
+  // Detect if player just made a local choice (vs viewing from URL)
+  // True if: no URL state OR gameState has choices that urlGameState doesn't have
+  const isLocalChoice = urlGameState === null || (
+    urlGameState && gameState &&
+    JSON.stringify(gameState.rounds[gameState.currentRound]?.choices) !==
+    JSON.stringify(urlGameState.rounds[urlGameState.currentRound]?.choices)
+  );
+
+  console.log('🎮 Game view logic:', {
+    currentRound: gameState.currentRound,
+    needsChoice,
+    waitingForP1,
+    waitingForP2,
+    isP1FirstRound,
+    isP2FirstRound,
+    urlGameState: urlGameState ? 'loaded from URL' : 'null',
+    totals: gameState.totals,
+  });
+
   return (
     <ErrorBoundary>
       <div style={styles.container}>
@@ -173,29 +219,124 @@ function App(): ReactElement {
             />
           )}
 
-          {/* Show payoff matrix for reference */}
-          <PayoffMatrix />
+          {/* Show payoff matrix for reference (unless P2 is seeing the story for the first time) */}
+          {!(urlGameState !== null && waitingForP2 && gameState.currentRound === 0) && (
+            <PayoffMatrix />
+          )}
 
           {/* Show choice interface or waiting message */}
           {needsChoice ? (
             <>
-              {waitingForP1 && (
+              {/* ROUND START - Both players need to choose */}
+              {waitingForP1 && waitingForP2 && (
                 <>
-                  <h2 style={styles.choiceTitle}>Your Choice (Player 1)</h2>
-                  <GameBoard
-                    onChoice={(choice) => makeChoice('p1', choice)}
-                    disabled={false}
-                    currentRound={gameState.currentRound + 1}
-                  />
+                  {/* P1 goes first - show P1's choice interface */}
+                  {isP1FirstRound && (
+                    <>
+                      <h2 style={styles.choiceTitle}>Your Choice (Player 1)</h2>
+                      <GameBoard
+                        onChoice={(choice) => makeChoice('p1', choice)}
+                        disabled={false}
+                        currentRound={gameState.currentRound + 1}
+                        scenarioText={gameState.currentRound === 0 ? "You and another player have been arrested. You're being interrogated separately. Will you stay silent or talk?" : undefined}
+                      />
+                    </>
+                  )}
+
+                  {/* P2 goes first - show P2's choice interface */}
+                  {isP2FirstRound && (
+                    <>
+                      <h2 style={styles.choiceTitle}>Your Choice (Player 2)</h2>
+                      <GameBoard
+                        onChoice={(choice) => makeChoice('p2', choice)}
+                        disabled={false}
+                        currentRound={gameState.currentRound + 1}
+                      />
+                    </>
+                  )}
                 </>
               )}
+
+              {/* P1 HAS CHOSEN, waiting for P2 */}
               {!waitingForP1 && waitingForP2 && (
-                <div style={styles.waitingBox}>
-                  <p style={styles.waitingMessage}>
-                    Player 1 has made their choice. Share this URL with Player 2:
-                  </p>
-                  <URLSharer gameState={gameState} playerName="Player 2" />
-                </div>
+                <>
+                  {/* P1 just made choice, show waiting message */}
+                  {isLocalChoice && (
+                    <div style={styles.waitingBox}>
+                      <h2 style={styles.choiceTitle}>Choice Made!</h2>
+                      <p style={styles.waitingMessage}>
+                        Send this URL to Player 2 so they can make their choice:
+                      </p>
+                      <URLSharer gameState={gameState} playerName="" />
+                    </div>
+                  )}
+
+                  {/* P2 viewing after P1 chose - Round 1 with story */}
+                  {!isLocalChoice && gameState.currentRound === 0 && (
+                    <>
+                      <div style={styles.storyBox}>
+                        <h2 style={styles.storyTitle}>The Setup</h2>
+                        <p style={styles.storyText}>
+                          Two prisoners are caught by the guards. Each is separated and offered a deal:
+                          give information about your partner in exchange for gold. But there's a catch -
+                          the reward depends on what your partner chooses too.
+                        </p>
+                        <p style={styles.storyQuestion}>
+                          <strong>Player 1 has made their choice. What will you do?</strong>
+                        </p>
+                      </div>
+
+                      <PayoffMatrix />
+
+                      <h2 style={styles.choiceTitle}>Your Choice (Player 2)</h2>
+                      <GameBoard
+                        onChoice={(choice) => makeChoice('p2', choice)}
+                        disabled={false}
+                        currentRound={gameState.currentRound + 1}
+                      />
+                    </>
+                  )}
+
+                  {/* P2 viewing after P1 chose (non-Round 1) - show P2's choice interface */}
+                  {!isLocalChoice && gameState.currentRound !== 0 && (
+                    <>
+                      <h2 style={styles.choiceTitle}>Your Choice (Player 2)</h2>
+                      <GameBoard
+                        onChoice={(choice) => makeChoice('p2', choice)}
+                        disabled={false}
+                        currentRound={gameState.currentRound + 1}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* P2 HAS CHOSEN, waiting for P1 */}
+              {waitingForP1 && !waitingForP2 && (
+                <>
+                  {/* P2 just made choice, show waiting message */}
+                  {isLocalChoice && (
+                    <div style={styles.waitingBox}>
+                      <h2 style={styles.choiceTitle}>Choice Made!</h2>
+                      <p style={styles.waitingMessage}>
+                        Send this URL to Player 1 so they can make their choice:
+                      </p>
+                      <URLSharer gameState={gameState} playerName="" />
+                    </div>
+                  )}
+
+                  {/* P1 viewing after P2 chose - show P1's choice interface */}
+                  {!isLocalChoice && (
+                    <>
+                      <h2 style={styles.choiceTitle}>Your Choice (Player 1)</h2>
+                      <GameBoard
+                        onChoice={(choice) => makeChoice('p1', choice)}
+                        disabled={false}
+                        currentRound={gameState.currentRound + 1}
+                      />
+                    </>
+                  )}
+                </>
               )}
             </>
           ) : (

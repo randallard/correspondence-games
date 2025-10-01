@@ -139,15 +139,15 @@ export const PayoffMatrix = (): ReactElement => {
             </th>
             <td style={dataCellStyles} aria-label="Both silent: 3 gold for you, 3 for opponent">
               <div style={playerLabelStyles}>You: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_SILENT.p1} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_SILENT.p1Gold} gold</div>
               <div style={playerLabelStyles}>Them: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_SILENT.p2} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_SILENT.p2Gold} gold</div>
             </td>
             <td style={dataCellStyles} aria-label="You silent, they talk: 0 gold for you, 5 for opponent">
               <div style={playerLabelStyles}>You: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_SILENT_P2_TALK.p1} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_SILENT_P2_TALK.p1Gold} gold</div>
               <div style={playerLabelStyles}>Them: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_SILENT_P2_TALK.p2} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_SILENT_P2_TALK.p2Gold} gold</div>
             </td>
           </tr>
           <tr>
@@ -156,15 +156,15 @@ export const PayoffMatrix = (): ReactElement => {
             </th>
             <td style={dataCellStyles} aria-label="You talk, they silent: 5 gold for you, 0 for opponent">
               <div style={playerLabelStyles}>You: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_TALK_P2_SILENT.p1} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_TALK_P2_SILENT.p1Gold} gold</div>
               <div style={playerLabelStyles}>Them: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_TALK_P2_SILENT.p2} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.P1_TALK_P2_SILENT.p2Gold} gold</div>
             </td>
             <td style={dataCellStyles} aria-label="Both talk: 1 gold for you, 1 for opponent">
               <div style={playerLabelStyles}>You: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_TALK.p1} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_TALK.p1Gold} gold</div>
               <div style={playerLabelStyles}>Them: </div>
-              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_TALK.p2} gold</div>
+              <div style={goldValueStyles}>{PAYOFF_MATRIX.BOTH_TALK.p2Gold} gold</div>
             </td>
           </tr>
         </tbody>

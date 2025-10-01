@@ -32,13 +32,13 @@ export const MAX_URL_LENGTH = 1500 as const;
  */
 export const PAYOFF_MATRIX = {
   /** Both players cooperate (silent) */
-  BOTH_SILENT: { p1: 3, p2: 3 },
+  BOTH_SILENT: { p1Gold: 3, p2Gold: 3 },
   /** P1 silent, P2 talks */
-  P1_SILENT_P2_TALK: { p1: 0, p2: 5 },
+  P1_SILENT_P2_TALK: { p1Gold: 0, p2Gold: 5 },
   /** P1 talks, P2 silent */
-  P1_TALK_P2_SILENT: { p1: 5, p2: 0 },
+  P1_TALK_P2_SILENT: { p1Gold: 5, p2Gold: 0 },
   /** Both players defect (talk) */
-  BOTH_TALK: { p1: 1, p2: 1 },
+  BOTH_TALK: { p1Gold: 1, p2Gold: 1 },
 } as const;
 
 /**

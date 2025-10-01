@@ -65,19 +65,27 @@ export function useURLState(): UseURLStateResult {
         setIsLoading(true);
         setError(null);
 
+        console.log('🔍 Parsing URL for game state...');
         const state = parseGameStateFromURL();
 
         if (state) {
+          console.log('✅ Found game state in URL:', {
+            gameId: state.gameId,
+            currentRound: state.currentRound,
+            phase: state.gamePhase,
+            p1Choice: state.rounds[state.currentRound]?.choices.p1,
+            p2Choice: state.rounds[state.currentRound]?.choices.p2,
+          });
           setURLGameState(state);
         } else {
-          // No state in URL - this is normal for new games
+          console.log('ℹ️ No game state in URL - new game');
           setURLGameState(null);
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error('Failed to load game from URL');
+        console.error('❌ Error loading game state from URL:', error);
         setError(error);
         setURLGameState(null);
-        console.error('Error loading game state from URL:', error);
       } finally {
         setIsLoading(false);
       }

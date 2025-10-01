@@ -109,6 +109,12 @@ export function useGameState(): UseGameStateResult {
       if (bothChosen) {
         // Calculate results since both players have chosen
         finalRound = calculateRoundResults(updatedRound);
+        console.log('📊 Round results calculated:', {
+          round: finalRound.roundNumber,
+          p1Choice: finalRound.choices.p1,
+          p2Choice: finalRound.choices.p2,
+          results: finalRound.results,
+        });
 
         // Update rounds array
         const updatedRounds = gameState.rounds.map((round, index) =>
@@ -120,8 +126,10 @@ export function useGameState(): UseGameStateResult {
           rounds: updatedRounds,
         };
 
+        console.log('💰 Totals before update:', gameState.totals);
         // Update totals with this round's results
         updatedGameState = updateTotals(updatedGameState, currentRoundIndex);
+        console.log('💰 Totals after update:', updatedGameState.totals);
 
         // Advance to next round or finish game
         updatedGameState = advanceToNextRound(updatedGameState);
@@ -146,6 +154,14 @@ export function useGameState(): UseGameStateResult {
           turnCount: updatedGameState.metadata.turnCount + 1,
         },
       };
+
+      console.log('✅ Choice made:', {
+        player: playerId,
+        choice,
+        bothChosen,
+        newRound: updatedGameState.currentRound,
+        phase: updatedGameState.gamePhase,
+      });
 
       setGameState(updatedGameState);
     },

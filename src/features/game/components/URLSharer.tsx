@@ -3,7 +3,7 @@
  * @module features/game/components/URLSharer
  */
 
-import { ReactElement, MouseEvent } from 'react';
+import { ReactElement, MouseEvent, useMemo } from 'react';
 import type { GameState } from '../schemas/gameSchema';
 import { useClipboard } from '../../../shared/hooks/useClipboard';
 import { generateShareableURL } from '../utils/urlGeneration';
@@ -52,8 +52,9 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
 
   /**
    * Generates the shareable URL for the current game state.
+   * Memoized to prevent regeneration on every render.
    */
-  const shareableURL = generateShareableURL(gameState);
+  const shareableURL = useMemo(() => generateShareableURL(gameState), [gameState]);
 
   /**
    * Handles the copy button click event.
@@ -183,10 +184,12 @@ export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactEleme
 
   return (
     <div style={containerStyles} role="region" aria-label="Share game URL">
-      <h3 style={headingStyles}>Share Game</h3>
-      <p style={descriptionStyles}>
-        {playerName}, share this URL with your opponent to continue the game:
-      </p>
+      <h3 style={headingStyles}>Share Game URL</h3>
+      {playerName && (
+        <p style={descriptionStyles}>
+          {playerName}, share this URL with your opponent:
+        </p>
+      )}
       <div style={urlBoxStyles} aria-label="Game URL" role="textbox" aria-readonly="true">
         {shareableURL}
       </div>

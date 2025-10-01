@@ -166,6 +166,7 @@ export function advanceToNextRound(gameState: GameState): GameState {
   return {
     ...gameState,
     currentRound: gameState.currentRound + 1,
+    gamePhase: PHASE.PLAYING as GamePhase,
     metadata: {
       ...gameState.metadata,
       lastMoveAt: new Date().toISOString(),
@@ -197,6 +198,14 @@ export function updateTotals(gameState: GameState, roundIndex: number): GameStat
   if (!round.results) {
     throw new PayoffCalculationError(`Round ${roundIndex} has no results to add to totals`);
   }
+
+  console.log('🔍 updateTotals debug:', {
+    roundIndex,
+    roundResults: round.results,
+    currentTotals: gameState.totals,
+    p1Gold: round.results.p1Gold,
+    p2Gold: round.results.p2Gold,
+  });
 
   return {
     ...gameState,

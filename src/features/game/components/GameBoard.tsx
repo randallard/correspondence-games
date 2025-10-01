@@ -18,6 +18,9 @@ interface GameBoardProps {
 
   /** Current round number (1-5) */
   currentRound: number;
+
+  /** Optional scenario instruction text to display */
+  scenarioText?: string;
 }
 
 /**
@@ -49,7 +52,7 @@ interface GameBoardProps {
  * </div>
  * ```
  */
-export const GameBoard = ({ onChoice, disabled, currentRound }: GameBoardProps): ReactElement => {
+export const GameBoard = ({ onChoice, disabled, currentRound, scenarioText }: GameBoardProps): ReactElement => {
   /**
    * Handles the "Stay Silent" button click.
    *
@@ -153,6 +156,11 @@ export const GameBoard = ({ onChoice, disabled, currentRound }: GameBoardProps):
       aria-atomic="true"
     >
       <h2 style={headingStyles}>Round {currentRound}</h2>
+      {scenarioText && (
+        <p style={{ ...instructionStyles, marginBottom: '16px', fontWeight: 600 }}>
+          {scenarioText}
+        </p>
+      )}
       <p style={instructionStyles}>Make your choice:</p>
       <div style={buttonContainerStyles} role="group" aria-label="Choice buttons">
         <div style={choiceWrapperStyles}>
