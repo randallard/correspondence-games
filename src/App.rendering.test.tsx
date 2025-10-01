@@ -513,12 +513,13 @@ describe('App - Conditional Rendering Logic', () => {
   });
 
   describe('Game Finished', () => {
-    it('should show game results after all 5 rounds complete', () => {
+    it('should show game results with immediate URL sharing after Player 2 completes Round 5', () => {
+      // Simulate: P2 just made Round 5 choice (second choice of round), completing the game
       let gameState = createNewGame();
       gameState.gamePhase = 'playing';
 
-      // Complete all 5 rounds
-      for (let i = 0; i < 5; i++) {
+      // Complete Rounds 1-4
+      for (let i = 0; i < 4; i++) {
         gameState.rounds[i].choices.p1 = 'silent';
         gameState.rounds[i].choices.p2 = 'silent';
         gameState.rounds[i] = calculateRoundResults(gameState.rounds[i]);
@@ -526,8 +527,36 @@ describe('App - Conditional Rendering Logic', () => {
         gameState = advanceToNextRound(gameState);
       }
 
+      // P1 made Round 5 choice, P2 just completed it
+      gameState.rounds[4].choices.p1 = 'silent';
+      gameState.rounds[4].choices.p2 = 'talk';
+      gameState.rounds[4] = calculateRoundResults(gameState.rounds[4]);
+      gameState = updateTotals(gameState, 4);
+      gameState.gamePhase = 'finished';
+
+      // urlGameState is what P2 loaded from URL (before their Round 5 choice)
+      let urlGameState = createNewGame();
+      urlGameState.gamePhase = 'playing';
+      for (let i = 0; i < 4; i++) {
+        urlGameState.rounds[i].choices.p1 = 'silent';
+        urlGameState.rounds[i].choices.p2 = 'silent';
+        urlGameState.rounds[i] = calculateRoundResults(urlGameState.rounds[i]);
+        urlGameState = updateTotals(urlGameState, i);
+        urlGameState = advanceToNextRound(urlGameState);
+      }
+      urlGameState.rounds[4].choices.p1 = 'silent';
+
+      // Mock useGameState to return finished game state
+      vi.spyOn(useGameStateModule, 'useGameState').mockReturnValue({
+        gameState: gameState,
+        initializeGame: vi.fn(),
+        makeChoice: vi.fn(),
+        resetGame: vi.fn(),
+        loadGame: vi.fn(),
+      });
+
       vi.spyOn(useURLStateModule, 'useURLState').mockReturnValue({
-        urlGameState: gameState,
+        urlGameState: urlGameState,
         isLoading: false,
         error: null,
         generateURL: vi.fn(),
@@ -541,6 +570,16 @@ describe('App - Conditional Rendering Logic', () => {
 
       // Should show complete history
       expect(screen.getByText(/Round History/i)).toBeInTheDocument();
+
+      // CRITICAL: Should show URL sharing interface IMMEDIATELY after game completes
+      expect(screen.getByText(/Share Game URL/i)).toBeInTheDocument();
+      expect(screen.getByText(/Send this URL to Player 1/i)).toBeInTheDocument();
+
+      // Should show optional message input field
+      expect(screen.getByPlaceholderText(/Add an optional message for Player 1/i)).toBeInTheDocument();
+
+      // Should show rematch button
+      expect(screen.getByText(/Rematch/i)).toBeInTheDocument();
     });
   });
 

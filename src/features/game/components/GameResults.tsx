@@ -20,6 +20,9 @@ interface GameResultsProps {
 
   /** Callback function when new game is requested */
   onNewGame: () => void;
+
+  /** Optional: Hide action buttons (rematch/new game) */
+  hideActions?: boolean;
 }
 
 /**
@@ -55,6 +58,7 @@ export const GameResults = ({
   gameState,
   onRematch,
   onNewGame,
+  hideActions = false,
 }: GameResultsProps): ReactElement => {
   /**
    * Handles the rematch button click.
@@ -232,22 +236,24 @@ export const GameResults = ({
         <RoundHistory rounds={gameState.rounds} currentPlayer="p1" />
       </div>
 
-      <div style={buttonContainerStyles} role="group" aria-label="Game actions">
-        <Button
-          variant="primary"
-          onClick={handleRematch}
-          ariaLabel="Request a rematch with the same opponent"
-        >
-          Rematch
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={handleNewGame}
-          ariaLabel="Start a new game with a different opponent"
-        >
-          New Game
-        </Button>
-      </div>
+      {!hideActions && (
+        <div style={buttonContainerStyles} role="group" aria-label="Game actions">
+          <Button
+            variant="primary"
+            onClick={handleRematch}
+            ariaLabel="Request a rematch with the same opponent"
+          >
+            Rematch
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleNewGame}
+            ariaLabel="Start a new game with a different opponent"
+          >
+            New Game
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

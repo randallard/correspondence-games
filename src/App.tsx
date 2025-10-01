@@ -141,17 +141,72 @@ function App(): ReactElement {
 
   // Show game results if game is finished
   if (gameState.gamePhase === 'finished') {
+    // Detect if player just completed the game locally (vs viewing from URL)
+    const justFinishedGame = urlGameState === null || (
+      urlGameState && gameState &&
+      urlGameState.gamePhase !== 'finished' && gameState.gamePhase === 'finished'
+    );
+
     return (
       <ErrorBoundary>
         <div style={styles.container}>
-          <GameResults
-            gameState={gameState}
-            onRematch={() => {
-              // Create new game and generate URL
-              initializeGame();
-            }}
-            onNewGame={() => resetGame()}
-          />
+          {/* Show URL sharing interface if player just finished the game */}
+          {justFinishedGame ? (
+            <>
+              <GameResults
+                gameState={gameState}
+                onRematch={() => {
+                  // Create new game and generate URL
+                  initializeGame();
+                }}
+                onNewGame={() => resetGame()}
+                hideActions={true}
+              />
+              <div style={styles.gameBox}>
+                <div style={styles.waitingBox}>
+                  <h2 style={styles.choiceTitle}>Game Complete!</h2>
+                  <p style={styles.waitingMessage}>
+                    Send this URL to Player 1 to show them the results:
+                  </p>
+                  <URLSharer gameState={gameState} playerName="" />
+
+                  {/* Optional message input */}
+                  <div style={styles.messageInputContainer}>
+                    <label htmlFor="player-message" style={styles.messageLabel}>
+                      Add an optional message for Player 1:
+                    </label>
+                    <textarea
+                      id="player-message"
+                      placeholder="Add an optional message for Player 1 (e.g., 'Good game!', 'Want a rematch?')"
+                      style={styles.messageInput}
+                      rows={3}
+                    />
+                  </div>
+
+                  {/* Rematch option */}
+                  <div style={styles.rematchSection}>
+                    <p style={styles.rematchText}>Want to play again?</p>
+                    <Button
+                      variant="primary"
+                      onClick={() => initializeGame()}
+                      ariaLabel="Start a rematch with role reversal"
+                    >
+                      Rematch
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <GameResults
+              gameState={gameState}
+              onRematch={() => {
+                // Create new game and generate URL
+                initializeGame();
+              }}
+              onNewGame={() => resetGame()}
+            />
+          )}
         </div>
       </ErrorBoundary>
     );
@@ -479,6 +534,39 @@ const styles = {
   errorMessage: {
     fontSize: '1.1rem',
     marginBottom: '30px',
+  },
+  messageInputContainer: {
+    marginTop: '30px',
+    textAlign: 'left' as const,
+  },
+  messageLabel: {
+    display: 'block',
+    fontSize: '1rem',
+    color: '#eee',
+    marginBottom: '10px',
+    fontWeight: 'bold',
+  },
+  messageInput: {
+    width: '100%',
+    padding: '12px',
+    fontSize: '1rem',
+    borderRadius: '8px',
+    border: '2px solid #3498db',
+    backgroundColor: '#16213e',
+    color: '#eee',
+    fontFamily: 'inherit',
+    resize: 'vertical' as const,
+  },
+  rematchSection: {
+    marginTop: '30px',
+    textAlign: 'center' as const,
+    paddingTop: '20px',
+    borderTop: '1px solid #3498db',
+  },
+  rematchText: {
+    fontSize: '1.1rem',
+    marginBottom: '15px',
+    color: '#eee',
   },
 } as const;
 

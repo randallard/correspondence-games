@@ -58,7 +58,12 @@ All conditional rendering tests pass by mocking the `useURLState` hook directly:
 - ✅ **[URL Generated]** P1 makes choice → Shows "Send URL to Player 2" *(uses isLocalChoice logic)*
 
 **Game Complete:**
-- ✅ Game results after all 5 rounds complete
+- ✅ Game results with immediate URL sharing after Player 2 completes Round 5
+  - Shows "Game Over!" and winner announcement
+  - Shows complete round history
+  - **Shows URL sharing interface immediately** with "Share Game URL" and "Send this URL to Player 1"
+  - Shows optional message input field with placeholder "Add an optional message for Player 1"
+  - Shows rematch button for starting new game
 
 **Edge Cases:**
 - ✅ Turn alternation verification
