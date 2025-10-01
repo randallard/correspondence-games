@@ -189,6 +189,37 @@ export const GameResults = ({
   };
 
   /**
+   * Message box styles for displaying opponent's message.
+   */
+  const messageBoxStyles: React.CSSProperties = {
+    marginBottom: '32px',
+    padding: '24px',
+    backgroundColor: '#eff6ff',
+    border: '2px solid #3b82f6',
+    borderRadius: '8px',
+  };
+
+  /**
+   * Message heading styles.
+   */
+  const messageHeadingStyles: React.CSSProperties = {
+    fontSize: '18px',
+    fontWeight: 600,
+    color: '#1e40af',
+    marginBottom: '12px',
+  };
+
+  /**
+   * Message text styles.
+   */
+  const messageTextStyles: React.CSSProperties = {
+    fontSize: '16px',
+    color: '#1f2937',
+    lineHeight: '1.6',
+    whiteSpace: 'pre-wrap',
+  };
+
+  /**
    * Button container styles.
    */
   const buttonContainerStyles: React.CSSProperties = {
@@ -235,6 +266,18 @@ export const GameResults = ({
       <div style={historySectionStyles}>
         <RoundHistory rounds={gameState.rounds} currentPlayer="p1" />
       </div>
+
+      {/* Display message from other player if present */}
+      {gameState.socialFeatures?.finalMessage && (
+        <div style={messageBoxStyles} role="region" aria-label="Message from opponent">
+          <h3 style={messageHeadingStyles}>
+            {gameState.socialFeatures.finalMessage.from === 'p1' ? 'Player 1' : 'Player 2'} says:
+          </h3>
+          <p style={messageTextStyles}>
+            {gameState.socialFeatures.finalMessage.text}
+          </p>
+        </div>
+      )}
 
       {!hideActions && (
         <div style={buttonContainerStyles} role="group" aria-label="Game actions">

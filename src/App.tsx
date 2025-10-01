@@ -3,7 +3,7 @@
  * @module App
  */
 
-import { ReactElement, useEffect } from 'react';
+import { ReactElement, useEffect, useState } from 'react';
 import { ErrorBoundary } from './shared/components/ErrorBoundary';
 import { LoadingSpinner } from './shared/components/LoadingSpinner';
 import { Button } from './shared/components/Button';
@@ -35,6 +35,7 @@ import { updateURLWithState } from './features/game/utils/urlGeneration';
 function App(): ReactElement {
   const { urlGameState, isLoading, error: urlError, generateURL } = useURLState();
   const { gameState, initializeGame, makeChoice, resetGame, loadGame } = useGameState();
+  const [playerMessage, setPlayerMessage] = useState<string>('');
 
   // DEBUG: Log state changes
   useEffect(() => {
@@ -168,7 +169,12 @@ function App(): ReactElement {
                   <p style={styles.waitingMessage}>
                     Send this URL to Player 1 to show them the results:
                   </p>
-                  <URLSharer gameState={gameState} playerName="" />
+                  <URLSharer
+                    gameState={gameState}
+                    playerName=""
+                    message={playerMessage}
+                    messageFrom="p2"
+                  />
 
                   {/* Optional message input */}
                   <div style={styles.messageInputContainer}>
@@ -180,7 +186,14 @@ function App(): ReactElement {
                       placeholder="Add an optional message for Player 1 (e.g., 'Good game!', 'Want a rematch?')"
                       style={styles.messageInput}
                       rows={3}
+                      value={playerMessage}
+                      onChange={(e) => setPlayerMessage(e.target.value)}
                     />
+                    {playerMessage && playerMessage.trim() && (
+                      <p style={styles.messageHint}>
+                        💡 URL updated with your message. Copy again to include it!
+                      </p>
+                    )}
                   </div>
 
                   {/* Rematch option */}
@@ -567,6 +580,12 @@ const styles = {
     fontSize: '1.1rem',
     marginBottom: '15px',
     color: '#eee',
+  },
+  messageHint: {
+    marginTop: '10px',
+    fontSize: '0.9rem',
+    color: '#f39c12',
+    fontStyle: 'italic',
   },
 } as const;
 

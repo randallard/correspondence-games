@@ -61,6 +61,51 @@ export function generateShareableURL(
 }
 
 /**
+ * Generates a shareable URL from game state with an optional message
+ *
+ * Adds a message to the socialFeatures.finalMessage field before encoding
+ *
+ * @param gameState - The game state to encode in the URL
+ * @param message - The message text to include (max 500 characters)
+ * @param from - Which player is sending the message ('p1' or 'p2')
+ * @param baseURL - Optional base URL (defaults to current window location)
+ * @returns Complete shareable URL with encrypted state parameter including message
+ * @throws {URLGenerationError} If URL generation fails
+ *
+ * @example
+ * ```typescript
+ * const gameState: GameState = { ... };
+ * const url = generateShareableURLWithMessage(gameState, 'Good game!', 'p2');
+ * // url: https://example.com/game?s=<encrypted_state_with_message>
+ * ```
+ */
+export function generateShareableURLWithMessage(
+  gameState: GameState,
+  message: string,
+  from: 'p1' | 'p2',
+  baseURL?: string
+): string {
+  try {
+    // Clone game state to avoid mutating original
+    const stateWithMessage: GameState = {
+      ...gameState,
+      socialFeatures: {
+        ...gameState.socialFeatures,
+        finalMessage: message.trim() ? {
+          from,
+          text: message.trim().substring(0, 500), // Enforce 500 char limit
+          timestamp: new Date().toISOString(),
+        } : undefined,
+      },
+    };
+
+    return generateShareableURL(stateWithMessage, baseURL);
+  } catch (error) {
+    throw new URLGenerationError('Failed to generate shareable URL with message', error);
+  }
+}
+
+/**
  * Extracts encrypted game state from URL parameters
  *
  * @param url - Optional URL string (defaults to window.location.href)

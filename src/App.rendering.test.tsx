@@ -513,6 +513,62 @@ describe('App - Conditional Rendering Logic', () => {
   });
 
   describe('Game Finished', () => {
+    it('should show Player 2 message when Player 1 views completed game from URL', () => {
+      // Simulate: P1 receives URL with game finished + P2's message
+      let finishedGameState = createNewGame();
+
+      // Complete all 5 rounds
+      for (let i = 0; i < 5; i++) {
+        finishedGameState.rounds[i].choices.p1 = 'silent';
+        finishedGameState.rounds[i].choices.p2 = 'silent';
+        finishedGameState.rounds[i] = calculateRoundResults(finishedGameState.rounds[i]);
+        finishedGameState = updateTotals(finishedGameState, i);
+        if (i < 4) {
+          finishedGameState = advanceToNextRound(finishedGameState);
+        }
+      }
+
+      // Set game phase to finished
+      finishedGameState.gamePhase = 'finished';
+      finishedGameState.currentRound = 4; // Last round
+
+      // Add Player 2's message
+      finishedGameState.socialFeatures = {
+        finalMessage: {
+          from: 'p2',
+          text: 'Good game! Want a rematch?',
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      // Mock: P1 loads finished game with message from URL
+      // urlGameState and gameState are the same (both finished) because P1 is viewing from URL
+      vi.spyOn(useGameStateModule, 'useGameState').mockReturnValue({
+        gameState: finishedGameState,
+        initializeGame: vi.fn(),
+        makeChoice: vi.fn(),
+        resetGame: vi.fn(),
+        loadGame: vi.fn(),
+      });
+
+      vi.spyOn(useURLStateModule, 'useURLState').mockReturnValue({
+        urlGameState: finishedGameState, // P1 loaded this from URL
+        isLoading: false,
+        error: null,
+        generateURL: vi.fn(),
+        updateURL: vi.fn(),
+      });
+
+      render(<App />);
+
+      // Should show game results (GameResults component)
+      expect(screen.getByText(/Game Over!/i)).toBeInTheDocument();
+
+      // CRITICAL: Should show Player 2's message
+      expect(screen.getByText(/Good game! Want a rematch\?/i)).toBeInTheDocument();
+      expect(screen.getByText(/Player 2 says:/i)).toBeInTheDocument();
+    });
+
     it('should show game results with immediate URL sharing after Player 2 completes Round 5', () => {
       // Simulate: P2 just made Round 5 choice (second choice of round), completing the game
       let gameState = createNewGame();

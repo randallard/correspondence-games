@@ -6,7 +6,7 @@
 import { ReactElement, MouseEvent, useMemo } from 'react';
 import type { GameState } from '../schemas/gameSchema';
 import { useClipboard } from '../../../shared/hooks/useClipboard';
-import { generateShareableURL } from '../utils/urlGeneration';
+import { generateShareableURL, generateShareableURLWithMessage } from '../utils/urlGeneration';
 
 /**
  * Props for the URLSharer component.
@@ -17,6 +17,12 @@ interface URLSharerProps {
 
   /** Name of the player sharing the game */
   playerName: string;
+
+  /** Optional message to include in the URL */
+  message?: string;
+
+  /** Which player is sending the message */
+  messageFrom?: 'p1' | 'p2';
 }
 
 /**
@@ -47,14 +53,20 @@ interface URLSharerProps {
  * </div>
  * ```
  */
-export const URLSharer = ({ gameState, playerName }: URLSharerProps): ReactElement => {
+export const URLSharer = ({ gameState, playerName, message, messageFrom }: URLSharerProps): ReactElement => {
   const { copyToClipboard, isCopied, error } = useClipboard(2000);
 
   /**
    * Generates the shareable URL for the current game state.
    * Memoized to prevent regeneration on every render.
+   * Includes message if provided.
    */
-  const shareableURL = useMemo(() => generateShareableURL(gameState), [gameState]);
+  const shareableURL = useMemo(() => {
+    if (message && message.trim() && messageFrom) {
+      return generateShareableURLWithMessage(gameState, message, messageFrom);
+    }
+    return generateShareableURL(gameState);
+  }, [gameState, message, messageFrom]);
 
   /**
    * Checks if the URL contains localhost (for development testing).
