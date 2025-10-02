@@ -3,7 +3,7 @@
  * @module features/game/types/history
  */
 
-import type { Round } from '../schemas/roundSchema';
+import type { Round } from '../schemas/gameSchema';
 
 /**
  * Message from a player at the end of the game.

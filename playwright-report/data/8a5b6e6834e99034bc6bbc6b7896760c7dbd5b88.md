@@ -1,0 +1,63 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e4]:
+  - heading "Prisoner's Dilemma" [level=1] [ref=e5]
+  - paragraph [ref=e6]: Round 1 of 5
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]: "Player 1 Gold:"
+      - generic [ref=e10]: 0 💰
+    - generic [ref=e11]:
+      - generic [ref=e12]: "Player 2 Gold:"
+      - generic [ref=e13]: 0 💰
+  - generic [ref=e14]:
+    - heading "The Setup" [level=2] [ref=e15]
+    - paragraph [ref=e16]: "Two prisoners are caught by the guards. Each is separated and offered a deal: give information about your partner in exchange for gold. But there's a catch - the reward depends on what your partner chooses too."
+    - paragraph [ref=e17]:
+      - strong [ref=e18]: Player 1 has made their choice. What will you do?
+  - region "Payoff matrix" [ref=e19]:
+    - heading "Payoff Matrix" [level=3] [ref=e20]
+    - table "Prisoner's Dilemma payoff outcomes" [ref=e21]:
+      - rowgroup [ref=e22]:
+        - row "Choice combinations Opponent stays silent Opponent talks" [ref=e23]:
+          - columnheader "Choice combinations" [ref=e24]: Your Choice / Their Choice
+          - columnheader "Opponent stays silent" [ref=e25]: They Stay Silent
+          - columnheader "Opponent talks" [ref=e26]: They Talk
+      - rowgroup [ref=e27]:
+        - 'row "You stay silent Both silent: 3 gold for you, 3 for opponent You silent, they talk: 0 gold for you, 5 for opponent" [ref=e28]':
+          - rowheader "You stay silent" [ref=e29]: You Stay Silent
+          - 'cell "Both silent: 3 gold for you, 3 for opponent" [ref=e30]':
+            - generic [ref=e31]: "You:"
+            - generic [ref=e32]: 3 gold
+            - generic [ref=e33]: "Them:"
+            - generic [ref=e34]: 3 gold
+          - 'cell "You silent, they talk: 0 gold for you, 5 for opponent" [ref=e35]':
+            - generic [ref=e36]: "You:"
+            - generic [ref=e37]: 0 gold
+            - generic [ref=e38]: "Them:"
+            - generic [ref=e39]: 5 gold
+        - 'row "You talk You talk, they silent: 5 gold for you, 0 for opponent Both talk: 1 gold for you, 1 for opponent" [ref=e40]':
+          - rowheader "You talk" [ref=e41]: You Talk
+          - 'cell "You talk, they silent: 5 gold for you, 0 for opponent" [ref=e42]':
+            - generic [ref=e43]: "You:"
+            - generic [ref=e44]: 5 gold
+            - generic [ref=e45]: "Them:"
+            - generic [ref=e46]: 0 gold
+          - 'cell "Both talk: 1 gold for you, 1 for opponent" [ref=e47]':
+            - generic [ref=e48]: "You:"
+            - generic [ref=e49]: 1 gold
+            - generic [ref=e50]: "Them:"
+            - generic [ref=e51]: 1 gold
+  - heading "Your Choice (Player 2)" [level=2] [ref=e52]
+  - region "Game board" [ref=e53]:
+    - heading "Round 1" [level=2] [ref=e54]
+    - paragraph [ref=e55]: "Make your choice:"
+    - group "Choice buttons" [ref=e56]:
+      - generic [ref=e57]:
+        - button "Choose to stay silent and cooperate" [ref=e58] [cursor=pointer]: Stay Silent
+        - generic "Silent means cooperate" [ref=e59]: (Cooperate)
+      - generic [ref=e60]:
+        - button "Choose to talk and defect" [ref=e61] [cursor=pointer]: Talk
+        - generic "Talk means defect" [ref=e62]: (Defect)
+```

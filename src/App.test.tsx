@@ -14,6 +14,19 @@ import { createNewGame, calculateRoundResults, updateTotals, advanceToNextRound 
 import { encryptGameState } from './features/game/utils/encryption';
 import type { GameState } from './features/game/schemas/gameSchema';
 
+// Mock useGameHistory hook to skip player name prompt in tests
+vi.mock('./features/game/hooks/useGameHistory', () => ({
+  useGameHistory: () => ({
+    playerName: 'TestPlayer',
+    games: [],
+    addCompletedGame: vi.fn(),
+    clearHistory: vi.fn(),
+    removeGame: vi.fn(),
+    setPlayerName: vi.fn(),
+    isLoading: false,
+  }),
+}));
+
 // Helper function to set URL with game state
 function setURLWithGameState(gameState: GameState) {
   const encrypted = encryptGameState(gameState);

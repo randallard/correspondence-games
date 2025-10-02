@@ -14,6 +14,19 @@ import type { GameState } from './features/game/schemas/gameSchema';
 import * as useURLStateModule from './features/game/hooks/useURLState';
 import * as useGameStateModule from './features/game/hooks/useGameState';
 
+// Mock useGameHistory hook to skip player name prompt in tests
+vi.mock('./features/game/hooks/useGameHistory', () => ({
+  useGameHistory: () => ({
+    playerName: 'TestPlayer',
+    games: [],
+    addCompletedGame: vi.fn(),
+    clearHistory: vi.fn(),
+    removeGame: vi.fn(),
+    setPlayerName: vi.fn(),
+    isLoading: false,
+  }),
+}));
+
 describe('App - Conditional Rendering Logic', () => {
   beforeEach(() => {
     vi.clearAllMocks();

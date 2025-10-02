@@ -3,7 +3,7 @@
  * @module App
  */
 
-import { ReactElement, useEffect, useState } from 'react';
+import { ReactElement, useEffect, useState, useCallback, useRef } from 'react';
 import { ErrorBoundary } from './shared/components/ErrorBoundary';
 import { LoadingSpinner } from './shared/components/LoadingSpinner';
 import { Button } from './shared/components/Button';
@@ -12,10 +12,17 @@ import { GameResults } from './features/game/components/GameResults';
 import { URLSharer } from './features/game/components/URLSharer';
 import { PayoffMatrix } from './features/game/components/PayoffMatrix';
 import { RoundHistory } from './features/game/components/RoundHistory';
+import { PlayerNamePrompt } from './features/game/components/PlayerNamePrompt';
+import { GameHistoryPanel } from './features/game/components/GameHistoryPanel';
+import { ToastContainer } from './features/game/components/ToastNotification';
 import { useGameState } from './features/game/hooks/useGameState';
 import { useURLState } from './features/game/hooks/useURLState';
+import { useGameHistory } from './features/game/hooks/useGameHistory';
 import { GameState } from './features/game/schemas/gameSchema';
 import { updateURLWithState } from './features/game/utils/urlGeneration';
+import { convertGameStateToCompletedGame, processRematchForP1, createRematchGame } from './features/game/utils/rematch';
+import type { ToastNotification } from './features/game/types/history';
+import { clearGameHistory } from './features/game/hooks/useLocalStorage';
 
 /**
  * Main application component
@@ -35,7 +42,84 @@ import { updateURLWithState } from './features/game/utils/urlGeneration';
 function App(): ReactElement {
   const { urlGameState, isLoading, error: urlError, generateURL } = useURLState();
   const { gameState, initializeGame, makeChoice, resetGame, loadGame } = useGameState();
+  const { playerName, games: gameHistory, addCompletedGame, setPlayerName, clearHistory, isLoading: isHistoryLoading } = useGameHistory();
+
   const [playerMessage, setPlayerMessage] = useState<string>('');
+  const [showNamePrompt, setShowNamePrompt] = useState<boolean>(false);
+  const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
+  // Track which games have been saved to prevent duplicates
+  const savedGamesRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Adds a toast notification.
+   */
+  const addToast = useCallback((message: string, type: 'info' | 'warning' | 'success') => {
+    const toast: ToastNotification = {
+      id: `toast-${Date.now()}-${Math.random()}`,
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    setToasts(prev => [...prev, toast]);
+  }, []);
+
+  /**
+   * Dismisses a toast notification by ID.
+   */
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  /**
+   * Handles player name submission from PlayerNamePrompt.
+   */
+  const handleNameSubmit = useCallback((name: string, startFresh: boolean) => {
+    setPlayerName(name);
+    setShowNamePrompt(false);
+
+    if (startFresh) {
+      clearHistory();
+      addToast('Game history cleared. Starting fresh!', 'info');
+    } else {
+      addToast(`Welcome back, ${name}!`, 'success');
+    }
+  }, [setPlayerName, clearHistory, addToast]);
+
+  /**
+   * Handles rematch button click.
+   * Creates a new game with role reversal and embeds previous game results.
+   */
+  const handleRematch = useCallback(() => {
+    if (!gameState || gameState.gamePhase !== 'finished') {
+      console.error('Cannot create rematch: game not finished');
+      return;
+    }
+
+    try {
+      // 1. Convert to CompletedGame
+      const completedGame = convertGameStateToCompletedGame(gameState);
+
+      // 2. Save to localStorage (P2's history - they're initiating the rematch)
+      if (!savedGamesRef.current.has(gameState.gameId)) {
+        addCompletedGame(completedGame);
+        savedGamesRef.current.add(gameState.gameId);
+        console.log('✅ Game saved to history before rematch:', completedGame.gameId);
+      }
+
+      // 3. Create rematch game with previousGameResults embedded
+      const rematchGame = createRematchGame(gameState, completedGame);
+
+      // 4. Load new game
+      loadGame(rematchGame);
+
+      addToast('Rematch started! You go first.', 'success');
+      console.log('🎮 Rematch game created:', rematchGame.gameId);
+    } catch (error) {
+      console.error('Failed to create rematch:', error);
+      addToast('Failed to create rematch. Please try again.', 'warning');
+    }
+  }, [gameState, addCompletedGame, loadGame, addToast]);
 
   // DEBUG: Log state changes
   useEffect(() => {
@@ -55,13 +139,44 @@ function App(): ReactElement {
     console.log('==================');
   }, [urlGameState, gameState]);
 
-  // Load game from URL on mount
+  // Load game from URL on mount - with rematch processing
   useEffect(() => {
     if (urlGameState && !gameState) {
       console.log('🔄 Loading game from URL');
-      loadGame(urlGameState);
+
+      // Check if this is a rematch invitation
+      if (urlGameState.previousGameResults) {
+        console.log('🎮 Processing rematch invitation for P1');
+
+        // Process rematch and extract previous game
+        const { previousGame, cleanedGameState } = processRematchForP1(urlGameState);
+
+        // Save previous game to P1's localStorage
+        if (previousGame) {
+          try {
+            addCompletedGame(previousGame);
+            console.log('✅ Previous game saved to P1 history');
+            addToast('Previous game results saved to your history', 'info');
+          } catch (error) {
+            console.error('Failed to save previous game:', error);
+          }
+        }
+
+        // Load cleaned game state (without previousGameResults)
+        loadGame(cleanedGameState);
+      } else {
+        // Normal game load (not rematch)
+        loadGame(urlGameState);
+      }
     }
-  }, [urlGameState, gameState, loadGame]);
+  }, [urlGameState, gameState, loadGame, addCompletedGame, addToast]);
+
+  // Initialize player name on mount - wait for loading to complete
+  useEffect(() => {
+    if (!isHistoryLoading && !playerName) {
+      setShowNamePrompt(true);
+    }
+  }, [isHistoryLoading, playerName]);
 
   // Update URL whenever game state changes (but not on initial load)
   useEffect(() => {
@@ -72,10 +187,45 @@ function App(): ReactElement {
     }
   }, [gameState, urlGameState]);
 
+  // Save completed games to localStorage
+  useEffect(() => {
+    if (
+      gameState &&
+      gameState.gamePhase === 'finished' &&
+      !savedGamesRef.current.has(gameState.gameId)
+    ) {
+      try {
+        const completedGame = convertGameStateToCompletedGame(gameState);
+        addCompletedGame(completedGame);
+        savedGamesRef.current.add(gameState.gameId);
+
+        console.log('✅ Game saved to history:', completedGame.gameId);
+      } catch (error) {
+        console.error('Failed to save game to history:', error);
+      }
+    }
+  }, [gameState, addCompletedGame]);
+
+  // Show player name prompt if needed
+  if (showNamePrompt && !isLoading) {
+    return (
+      <ErrorBoundary>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <div style={styles.container}>
+          <PlayerNamePrompt
+            onNameSubmit={handleNameSubmit}
+            hasHistory={gameHistory.length > 0}
+          />
+        </div>
+      </ErrorBoundary>
+    );
+  }
+
   // Show loading state while parsing URL
   if (isLoading) {
     return (
       <ErrorBoundary>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <div style={styles.container}>
           <LoadingSpinner message="Loading game..." />
         </div>
@@ -87,6 +237,7 @@ function App(): ReactElement {
   if (urlError) {
     return (
       <ErrorBoundary>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <div style={styles.container}>
           <div style={styles.errorBox}>
             <h2 style={styles.errorTitle}>Invalid Game Link</h2>
@@ -106,10 +257,19 @@ function App(): ReactElement {
   if (!gameState) {
     return (
       <ErrorBoundary>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <div style={styles.container}>
           <div style={styles.welcomeBox}>
             <h1 style={styles.title}>The Prisoner's Dilemma</h1>
             <p style={styles.subtitle}>A Game of Trust and Betrayal</p>
+
+            {/* Show game history if available */}
+            {gameHistory.length > 0 && playerName && (
+              <GameHistoryPanel
+                games={gameHistory}
+                currentPlayerName={playerName}
+              />
+            )}
 
             <div style={styles.storyBox}>
               <h2 style={styles.storyTitle}>The Setup</h2>
@@ -150,16 +310,24 @@ function App(): ReactElement {
 
     return (
       <ErrorBoundary>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <div style={styles.container}>
+          {/* Show game history if available */}
+          {gameHistory.length > 0 && playerName && (
+            <div style={styles.gameBox}>
+              <GameHistoryPanel
+                games={gameHistory}
+                currentPlayerName={playerName}
+              />
+            </div>
+          )}
+
           {/* Show URL sharing interface if player just finished the game */}
           {justFinishedGame ? (
             <>
               <GameResults
                 gameState={gameState}
-                onRematch={() => {
-                  // Create new game and generate URL
-                  initializeGame();
-                }}
+                onRematch={handleRematch}
                 onNewGame={() => resetGame()}
                 hideActions={true}
               />
@@ -213,10 +381,7 @@ function App(): ReactElement {
           ) : (
             <GameResults
               gameState={gameState}
-              onRematch={() => {
-                // Create new game and generate URL
-                initializeGame();
-              }}
+              onRematch={handleRematch}
               onNewGame={() => resetGame()}
             />
           )}
@@ -260,6 +425,7 @@ function App(): ReactElement {
 
   return (
     <ErrorBoundary>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <div style={styles.container}>
         <div style={styles.gameBox}>
           <h1 style={styles.title}>Prisoner's Dilemma</h1>
