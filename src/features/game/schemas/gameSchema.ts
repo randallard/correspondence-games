@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import type { CompletedGame } from '../types/history';
 
 /**
  * Choice type - either 'silent' (cooperate) or 'talk' (defect)
@@ -117,6 +118,22 @@ export const PlayerMessageSchema = z.object({
 export type PlayerMessage = z.infer<typeof PlayerMessageSchema>;
 
 /**
+ * Toast notification schema
+ * Used for system messages and notifications
+ */
+export const ToastNotificationSchema = z.object({
+  /** Unique notification ID */
+  id: z.string(),
+  /** Notification type */
+  type: z.enum(['info', 'warning', 'success']),
+  /** Notification message */
+  message: z.string(),
+  /** ISO timestamp when notification was created */
+  timestamp: z.string().datetime(),
+});
+export type ToastNotification = z.infer<typeof ToastNotificationSchema>;
+
+/**
  * Social features schema
  * Contains optional social interactions like messaging and rematches
  */
@@ -168,6 +185,12 @@ export const GameStateSchema = z.object({
   metadata: GameMetadataSchema,
   /** Optional social features */
   socialFeatures: SocialFeaturesSchema.optional(),
+  /** Links to previous game in history (for rematch chain) */
+  previousGameId: z.string().optional(),
+  /** System toast notifications */
+  toastNotifications: z.array(ToastNotificationSchema).optional(),
+  /** TEMPORARY: Previous game results embedded for P1's first view of rematch */
+  previousGameResults: z.any().optional(), // Using z.any() to avoid circular dependency with CompletedGame
 });
 
 /**
