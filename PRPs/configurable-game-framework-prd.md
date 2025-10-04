@@ -1,5 +1,17 @@
 # Configurable Correspondence Game Framework - Planning PRD
 
+> **Repository Context**: This is the `correspondence-games` PRP workspace repository - a development environment using Claude Code to create and manage correspondence games.
+>
+> **Multi-Repository Architecture**:
+> - **`correspondence-games-framework`** - Master framework repo with game links (separate repo, gitignored here)
+> - **Individual game repos** (e.g., `prisoners-dilemma-game`, `rock-paper-scissors-game`) - Each deploys to GitHub Pages
+> - **This repo (`correspondence-games`)** - PRP workspace for Claude Code development workflows
+>
+> **Framework Documentation** (in `correspondence-games-framework` repo):
+> - `framework-considerations.md` - Core architecture patterns
+> - `security-considerations.md` - Security implementation guide
+> - Links to all deployed game instances
+
 ## Executive Summary
 
 ### Problem Statement
@@ -100,14 +112,14 @@ A **declarative game configuration system** that allows new correspondence games
 - Round count = 0 → Validation error
 
 ### Story 4: Player Completes Game and Downloads History
-**As a player**, I want to download my game history when a game finishes, so that I can keep a record before it's deleted from my browser.
+**As a player**, I want to download my game history when a game finishes, so that I can keep a record of each move before it's deleted from my browser.
 
 **Acceptance Criteria:**
 - [ ] When game reaches "finished" status, show results screen
 - [ ] Results screen displays download button with clear messaging
 - [ ] Notice: "This game will be deleted when you start a new game"
 - [ ] Download creates JSON file with complete game history
-- [ ] Downloaded file includes: all rounds, choices, scores, timestamps, player names
+- [ ] Downloaded file includes: all rounds, all choices made by both players for each round, scores, timestamps, player names, move-by-move history
 - [ ] Starting a new game auto-deletes finished games from localStorage
 
 **Edge Cases:**
@@ -562,9 +574,13 @@ interface DeltaURLPayload {
 
 /**
  * Encrypted URL structure (what actually goes in hash fragment)
- * After compression and encryption of above payloads
+ * After compression, encryption, and HMAC signing of above payloads
+ *
+ * CRITICAL SECURITY: Format is base64(encrypted_data.hmac_signature)
+ * - Encryption provides confidentiality (unreadable)
+ * - HMAC provides integrity (tamper-proof)
  */
-type EncryptedURLFragment = string;  // base64(encrypted(compressed(payload)))
+type EncryptedURLFragment = string;  // base64(encrypted(compressed(payload)).hmac_signature)
 ```
 
 ### Configuration Schema (Zod)
@@ -915,7 +931,12 @@ class DeltaURLGenerator {
   }
 
   /**
-   * Encrypts payload and builds hash fragment URL
+   * Encrypts payload and builds hash fragment URL with HMAC signature
+   * Validates URL length constraint (< 1800 characters)
+   *
+   * CRITICAL SECURITY: Uses HMAC for tamper detection
+   * - Encryption provides confidentiality (unreadable)
+   * - HMAC provides integrity (tamper-proof)
    */
   private async encryptAndBuildURL(
     payload: InitialURLPayload | DeltaURLPayload
@@ -926,19 +947,86 @@ class DeltaURLGenerator {
     // Compress (using lz-string as per framework docs)
     const compressed = LZString.compressToEncodedURIComponent(json);
 
-    // Encrypt (using Crypto-JS AES as per framework docs)
+    // Encrypt (using Crypto-JS AES for confidentiality)
     const encrypted = CryptoJS.AES.encrypt(compressed, this.config.secret).toString();
 
-    // Base64 encode
-    const encoded = btoa(encrypted);
+    // CRITICAL: Generate HMAC signature for integrity verification
+    // This prevents tampering - encryption alone is NOT sufficient
+    const hmac = await this.generateHMAC(encrypted);
 
-    // Build URL with hash fragment (no readable data)
+    // Combine: encrypted_data.hmac_signature
+    const combined = `${encrypted}.${hmac}`;
+
+    // Base64 encode entire payload
+    const encoded = btoa(combined);
+
+    // Build URL with hash fragment (no readable data, tamper-proof)
     const baseUrl = window.location.origin + window.location.pathname;
-    return `${baseUrl}#${encoded}`;
+    const url = `${baseUrl}#${encoded}`;
+
+    // CRITICAL: Validate URL length constraint
+    if (url.length > 1800) {
+      throw new Error(`URL length exceeded: ${url.length} characters (max 1800)`);
+    }
+
+    return url;
   }
 
   /**
-   * Parses URL and extracts payload
+   * Generates HMAC-SHA256 signature for data integrity
+   * @param data - Data to sign (encrypted payload)
+   * @returns Base64-encoded HMAC signature
+   */
+  private async generateHMAC(data: string): Promise<string> {
+    const encoder = new TextEncoder();
+
+    // Import secret as crypto key
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(this.config.secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    // Generate signature
+    const signature = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      encoder.encode(data)
+    );
+
+    // Convert to base64
+    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+  }
+
+  /**
+   * Verifies HMAC signature using constant-time comparison
+   * @param data - Data that was signed
+   * @param signature - HMAC signature to verify
+   * @returns True if signature is valid
+   */
+  private async verifyHMAC(data: string, signature: string): Promise<boolean> {
+    const expectedSignature = await this.generateHMAC(data);
+
+    // CRITICAL: Constant-time comparison prevents timing attacks
+    if (signature.length !== expectedSignature.length) {
+      return false;
+    }
+
+    let result = 0;
+    for (let i = 0; i < signature.length; i++) {
+      result |= signature.charCodeAt(i) ^ expectedSignature.charCodeAt(i);
+    }
+
+    return result === 0;
+  }
+
+  /**
+   * Parses URL and extracts payload with HMAC verification
+   *
+   * CRITICAL SECURITY: Verifies HMAC BEFORE decryption
+   * This prevents processing of tampered data
    */
   static async parseURL(url: string, secret: string): Promise<{
     payload: InitialURLPayload | DeltaURLPayload;
@@ -949,13 +1037,34 @@ class DeltaURLGenerator {
     if (!hash) throw new Error('No data in URL');
 
     // Decode base64
-    const encrypted = atob(hash);
+    const combined = atob(hash);
 
-    // Decrypt
+    // Split encrypted data and HMAC signature
+    const parts = combined.split('.');
+    if (parts.length !== 2) {
+      throw new Error('Invalid URL structure - missing HMAC signature');
+    }
+
+    const [encrypted, hmacSignature] = parts;
+
+    // CRITICAL: Verify HMAC BEFORE any decryption or processing
+    // This prevents wasting CPU on tampered data
+    const isValid = await this.verifyHMACStatic(encrypted, hmacSignature, secret);
+    if (!isValid) {
+      throw new Error('HMAC verification failed - URL has been tampered with');
+    }
+
+    // HMAC verified - safe to decrypt
     const decrypted = CryptoJS.AES.decrypt(encrypted, secret).toString(CryptoJS.enc.Utf8);
+    if (!decrypted) {
+      throw new Error('Decryption failed');
+    }
 
     // Decompress
     const json = LZString.decompressFromEncodedURIComponent(decrypted);
+    if (!json) {
+      throw new Error('Decompression failed');
+    }
 
     // Parse
     const payload = JSON.parse(json);
@@ -966,6 +1075,43 @@ class DeltaURLGenerator {
       : undefined; // Delta URLs don't contain gameType, must get from localStorage
 
     return { payload, gameType };
+  }
+
+  /**
+   * Static HMAC verification helper
+   */
+  private static async verifyHMACStatic(
+    data: string,
+    signature: string,
+    secret: string
+  ): Promise<boolean> {
+    const encoder = new TextEncoder();
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    const expectedSig = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      encoder.encode(data)
+    );
+
+    const expectedSigB64 = btoa(String.fromCharCode(...new Uint8Array(expectedSig)));
+
+    // Constant-time comparison
+    if (signature.length !== expectedSigB64.length) return false;
+
+    let result = 0;
+    for (let i = 0; i < signature.length; i++) {
+      result |= signature.charCodeAt(i) ^ expectedSigB64.charCodeAt(i);
+    }
+
+    return result === 0;
   }
 }
 ```
@@ -1479,6 +1625,16 @@ npm run test:integration -- localStorage-manager
 - **Fallback**: Reject turn, don't update localStorage
 - **Testing**: Generate test cases from turnSchema
 
+#### Risk 5: URL Length Exceeded
+**Scenario**: Delta URLs or initial URLs exceed browser URL limits
+
+**Mitigation**:
+- **URL Length Validation**: Enforce strict < 1800 character limit for all generated URLs
+- **Pre-generation check**: Validate URL length before displaying share interface
+- **Compression optimization**: Use maximum lz-string compression settings
+- **User feedback**: Clear error message if URL would be too long
+- **Testing**: Test with maximum payoff values, long player names, edge cases
+
 ### Edge Cases to Handle
 
 #### Config Validation Edge Cases
@@ -1685,6 +1841,333 @@ GameEngine.registerPlugin(myPlugin);
 
 ---
 
+## Deployment Strategy
+
+### Multi-Repository Architecture
+
+**Overview**: Three-tier repository system for framework development and game deployment.
+
+#### Repository 1: `correspondence-games-framework` (Master Framework)
+**Purpose**: Central hub with framework documentation and links to all game implementations
+**Hosting**: GitHub Pages
+**URL**: `https://USERNAME.github.io/correspondence-games-framework/`
+
+**Structure**:
+```
+correspondence-games-framework/
+├── README.md                    # Framework overview + links to all games
+├── docs/
+│   ├── framework-considerations.md
+│   ├── security-considerations.md
+│   ├── getting-started.md
+│   └── creating-games.md
+├── templates/
+│   ├── game-template/          # Starter template for new games
+│   └── config-examples/        # YAML config examples
+├── games/                       # Gitignored - links only
+│   ├── prisoners-dilemma/      # Git submodule or link to repo
+│   ├── rock-paper-scissors/    # Git submodule or link to repo
+│   └── README.md               # Index of all game repos
+└── .gitignore                   # Ignores games/*/ directories
+```
+
+**`games/README.md` Example**:
+```markdown
+# Available Games
+
+## Deployed Games
+- [Prisoner's Dilemma](https://USERNAME.github.io/prisoners-dilemma-game/) - [Repo](https://github.com/USERNAME/prisoners-dilemma-game)
+- [Rock Paper Scissors](https://USERNAME.github.io/rock-paper-scissors-game/) - [Repo](https://github.com/USERNAME/rock-paper-scissors-game)
+
+## How to Create Your Own
+See [Creating Games Guide](../docs/creating-games.md)
+```
+
+#### Repository 2: Individual Game Repos (e.g., `prisoners-dilemma-game`)
+**Purpose**: Self-contained game implementation that deploys to GitHub Pages
+**Hosting**: GitHub Pages (each game has own URL)
+**URL**: `https://USERNAME.github.io/GAME-NAME-game/`
+
+**Structure** (per game):
+```
+prisoners-dilemma-game/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml           # Automated deployment workflow
+├── configs/
+│   └── prisoners-dilemma.yaml   # Single game config
+├── src/                         # React + TypeScript source (framework code)
+├── dist/                        # Build output
+├── package.json
+├── vite.config.ts              # GitHub Pages base path
+└── README.md                    # Game-specific README
+```
+
+#### Repository 3: `correspondence-games` (PRP Workspace - THIS REPO)
+**Purpose**: Claude Code development workspace with PRPs, templates, and AI documentation
+**Hosting**: Not deployed - local development only
+**Usage**: PRP-driven development environment
+
+**Structure**:
+```
+correspondence-games/
+├── .claude/                     # Claude Code commands
+├── PRPs/                        # Product Requirement Prompts
+│   ├── templates/
+│   ├── ai_docs/
+│   └── configurable-game-framework-prd.md
+├── correspondence-games-framework/  # GITIGNORED - separate repo
+├── games/                       # GITIGNORED - individual repos
+│   ├── prisoners-dilemma-game/  # GITIGNORED
+│   └── rock-paper-scissors-game/ # GITIGNORED
+├── .gitignore                   # Excludes framework and game dirs
+└── README.md                    # PRP workspace guide
+```
+
+### GitHub Pages Deployment (Per Game)
+
+### GitHub Actions Workflow
+
+**File**: `.github/workflows/deploy.yml`
+
+```yaml
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # Run tests before deploying
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run type-check
+      - run: npm run test
+      - run: npm run test:e2e
+
+  # Build and deploy
+  build-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+### Vite Configuration for GitHub Pages
+
+**File**: `vite.config.ts`
+
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+
+  // GitHub Pages serves from /<repo-name>/
+  base: process.env.NODE_ENV === 'production'
+    ? '/correspondence-games/'  // Update with actual repo name
+    : '/',
+
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+
+    // Optimize for production
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'crypto-vendor': ['crypto-js', 'lz-string'],
+        },
+      },
+    },
+  },
+
+  // For local development
+  server: {
+    port: 3000,
+    open: true,
+  },
+})
+```
+
+### Creating Your Own Game
+
+**Two Approaches**: Use PRP workspace (Claude Code) or manual fork
+
+#### Approach 1: Using PRP Workspace (Recommended)
+
+**Prerequisites**:
+- Clone `correspondence-games` PRP workspace
+- Clone `correspondence-games-framework` separately
+- Have Claude Code installed
+
+**Workflow**:
+
+1. **Setup PRP Workspace**
+   ```bash
+   # Clone PRP workspace (this repo)
+   git clone https://github.com/ryankhetlyr/correspondence-games
+   cd correspondence-games
+
+   # Clone framework (gitignored, for reference)
+   git clone https://github.com/USERNAME/correspondence-games-framework
+
+   # Install dependencies
+   npm install
+   ```
+
+2. **Create New Game Using Claude Code**
+   ```bash
+   # Use PRP command to create new game
+   # (In Claude Code CLI)
+   /prp-base-create new game: Matching Pennies
+
+   # Claude generates complete game repo structure
+   # Output: games/matching-pennies-game/ (gitignored)
+   ```
+
+3. **Initialize Separate Game Repo**
+   ```bash
+   cd games/matching-pennies-game
+   git init
+   git remote add origin https://github.com/YOUR-USERNAME/matching-pennies-game
+   ```
+
+4. **Test Locally**
+   ```bash
+   npm install
+   npm run dev
+   # Opens http://localhost:3000
+   ```
+
+5. **Deploy to GitHub Pages**
+   ```bash
+   # Update vite.config.ts with repo name
+   # Then push
+   git add .
+   git commit -m "Initial game implementation"
+   git push -u origin main
+   # GitHub Actions auto-deploys
+   ```
+
+6. **Update Framework Repo Links**
+   - Add game link to `correspondence-games-framework/games/README.md`
+   - Commit to framework repo separately
+
+#### Approach 2: Manual Fork (Without PRP Workspace)
+
+1. **Fork Game Template**
+   ```bash
+   # Fork from framework repo's template
+   # Or fork existing game repo
+   git clone https://github.com/USERNAME/game-template
+   cd game-template
+   ```
+
+2. **Customize Game Config**
+   ```bash
+   # Edit YAML config
+   nano configs/game.yaml
+   ```
+
+3. **Update Package & Vite Config**
+   ```json
+   // package.json
+   {
+     "name": "my-custom-game",
+     "description": "My custom correspondence game"
+   }
+   ```
+
+   ```typescript
+   // vite.config.ts
+   base: '/my-custom-game/'
+   ```
+
+4. **Enable GitHub Pages**
+   - Settings → Pages → Source: GitHub Actions
+
+5. **Push to Deploy**
+   ```bash
+   git add .
+   git commit -m "Customize game"
+   git push origin main
+   ```
+
+6. **Access Deployed Game**
+   ```
+   https://YOUR-USERNAME.github.io/my-custom-game/
+   ```
+
+### Deployment Checklist
+
+**Pre-Deployment**:
+- [ ] All tests passing (`npm run test && npm run test:e2e`)
+- [ ] No TypeScript errors (`npm run type-check`)
+- [ ] No ESLint warnings (`npm run lint`)
+- [ ] URL length validation tested with all configs
+- [ ] Config files validated with schema
+- [ ] Vite base path configured correctly
+
+**Post-Deployment**:
+- [ ] Game loads on GitHub Pages URL
+- [ ] All game configs accessible
+- [ ] URL sharing works (copy to clipboard)
+- [ ] localStorage persistence works
+- [ ] Download feature works
+- [ ] Cross-browser testing (Chrome, Firefox, Safari, Mobile)
+
+**Monitoring**:
+- [ ] GitHub Actions workflow succeeds
+- [ ] No console errors in production
+- [ ] URL lengths stay < 1800 characters
+- [ ] Performance metrics acceptable (< 100ms state updates)
+
+---
+
 ## Next Steps
 
 After this PRD is approved:
@@ -1714,11 +2197,36 @@ After this PRD is approved:
 
 ## Open Questions for Stakeholders
 
-1. **Config Format**: Preference for JSON vs YAML? (YAML more readable, JSON more standard)
-2. **Game Discovery**: Should we build a game gallery UI or keep it simple with direct URLs?
-3. **Versioning**: How should we handle config version migrations?
-4. **Multi-player**: Is 3+ player support a future requirement? (Affects architecture)
-5. **Hosting**: Where should game config files be hosted? (Git repo, API, CDN?)
+### 1. Config Format Recommendation: YAML for MVP
+
+**Question**: Should we use JSON or YAML for game configuration files?
+
+**Research Summary** (based on 2024 industry analysis):
+- **YAML Advantages for Beginners**:
+  - Natural, human-readable format with minimal syntax
+  - Supports comments (crucial for explaining payoff matrix logic)
+  - Indentation-based structure is easier to read than JSON's braces
+  - Better for configuration files that require manual editing
+
+- **JSON Advantages**:
+  - Strict syntax prevents formatting errors
+  - Native JavaScript support (no parsing library needed)
+  - Better IDE validation and autocomplete
+  - Standard for APIs and data interchange
+
+**Recommendation for MVP**: **YAML**
+- Game configs will be manually edited by developers/educators
+- Comments are valuable for explaining game theory concepts
+- Human readability is a primary goal of this framework
+- Use `js-yaml` library for parsing (well-established, 17M+ weekly downloads)
+
+**Future Enhancement**: Support both formats (detect by file extension)
+
+### Resolved/Deferred Questions
+- ~~Game Discovery~~ - **Deferred**: Direct URLs only for MVP, gallery UI in post-MVP
+- ~~Versioning~~ - **Deferred**: Single version for MVP, migration strategy in post-MVP
+- ~~Multi-player~~ - **Deferred**: 2-player only for MVP
+- ~~Hosting~~ - **Resolved**: GitHub Pages with configs in `/games/configs/` directory
 
 ---
 

@@ -3,9 +3,18 @@
  * @module features/game/utils/encryption
  *
  * This module handles the encryption pipeline:
- * GameState -> JSON -> Compress -> Encrypt -> Base64 -> URL parameter
+ * GameState -> JSON -> Compress -> Encrypt + HMAC -> Base64 -> URL parameter
+ *
+ * CRITICAL SECURITY ARCHITECTURE:
+ * - Encryption (AES-256) provides CONFIDENTIALITY (unreadable URLs)
+ * - HMAC (SHA-256) provides INTEGRITY (tamper detection)
+ * - Both are required - encryption alone does NOT prevent tampering
  *
  * CRITICAL: All external data MUST be validated after decryption
+ *
+ * TODO: Add HMAC signature generation and verification
+ * Current implementation only has encryption (confidentiality)
+ * Need to add HMAC for integrity verification (see PRD section on DeltaURLGenerator)
  */
 
 import CryptoJS from 'crypto-js';

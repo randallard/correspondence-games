@@ -43,3 +43,9 @@ coverage/
 # Environment variables
 .env.local
 .env.*.local
+
+# Framework directory (separate git repo)
+correspondence-games-framework/
+
+# Game directories (each has own repo, managed separately)
+games/*/
