@@ -19,25 +19,34 @@ A **declarative game configuration system** that allows new correspondence games
 1. **Parse game definitions** from configuration files
 2. **Generate game logic** dynamically (payoffs, win conditions, valid moves)
 3. **Render generic UI** that adapts to game structure
-4. **Maintain existing features** (URL state, encryption, local storage, rematch)
+4. **Use localStorage as primary state storage** with delta-based URL sharing
+5. **Implement SHA-256 checksum verification** for move validation
+
+**Key Architectural Shifts:**
+- **localStorage-first**: Full game history stored locally, not in URLs
+- **Delta-based URLs**: URLs contain only latest move + checksum (not full state)
+- **Checksum verification**: SHA-256 hash validates entire game history
+- **No backward compatibility**: Clean break from existing Prisoner's Dilemma implementation
 
 **Key Insight**: All symmetric 2-player turn-based games share common patterns:
 - Players make choices from a fixed set of options
 - Payoffs are determined by a matrix of choice combinations
 - Rounds accumulate to determine a winner
-- State must be encoded/decoded for URL sharing
+- Turn structure defined per-game in configuration
 
 ### Success Metrics
 
 **Primary Goals:**
 - **Dev Velocity**: Create a new game in < 30 minutes (vs. 3+ hours currently)
 - **Code Reuse**: 80%+ of framework code shared across all games
-- **Ease of Use**: Non-developers can define games via JSON
+- **Ease of Use**: Non-developers can define games via JSON/YAML
+- **URL Efficiency**: Minimal URL length (only deltas, not full state)
 
 **Technical Goals:**
-- **Backward Compatible**: Existing Prisoner's Dilemma continues working
-- **URL Length**: Maintain < 1500 character URLs for complex games
+- **Fresh Start**: No backward compatibility constraints
+- **Security**: SHA-256 checksum prevents tampering
 - **Type Safety**: Full TypeScript validation for generated game logic
+- **localStorage Reliance**: Games require persistent storage (no cross-device resume)
 
 ---
 
@@ -64,11 +73,11 @@ A **declarative game configuration system** that allows new correspondence games
 **As an economics educator**, I want to create variants of Prisoner's Dilemma with different payoff values, so that I can demonstrate how outcomes change.
 
 **Acceptance Criteria:**
-- [ ] Clone `prisoners-dilemma.json` to `prisoners-dilemma-variant.json`
+- [ ] Clone `prisoners-dilemma.yaml` to `prisoners-dilemma-variant.yaml`
 - [ ] Modify payoff values (e.g., 3→4 for cooperation)
 - [ ] Both games coexist and are selectable
-- [ ] URL routes differentiate games (`/game?type=pd-variant&s=...`)
-- [ ] Game history tracks which variant was played
+- [ ] localStorage tracks which game type was played
+- [ ] Can download game history as JSON file
 
 **Edge Cases:**
 - Negative payoff values → Supported
@@ -83,14 +92,30 @@ A **declarative game configuration system** that allows new correspondence games
 - [ ] Specify `scoringMethod: cumulative` (vs. winner-per-round)
 - [ ] Set `winCondition: highest-total` or `first-to-threshold`
 - [ ] UI adapts to show all 10 rounds in history
-- [ ] URL encoding handles 10 rounds within size limits
+- [ ] localStorage stores full history regardless of round count
 
 **Edge Cases:**
-- Very high round counts (100+) → Warning about URL length
+- Very high round counts (100+) → localStorage can handle it
 - Round count = 1 → Single-round mode (no round counter UI)
 - Round count = 0 → Validation error
 
-### Story 4: Developer Extends Framework
+### Story 4: Player Completes Game and Downloads History
+**As a player**, I want to download my game history when a game finishes, so that I can keep a record before it's deleted from my browser.
+
+**Acceptance Criteria:**
+- [ ] When game reaches "finished" status, show results screen
+- [ ] Results screen displays download button with clear messaging
+- [ ] Notice: "This game will be deleted when you start a new game"
+- [ ] Download creates JSON file with complete game history
+- [ ] Downloaded file includes: all rounds, choices, scores, timestamps, player names
+- [ ] Starting a new game auto-deletes finished games from localStorage
+
+**Edge Cases:**
+- User closes tab without downloading → Game still in localStorage until new game started
+- User downloads multiple times → Each download creates new file
+- localStorage full → Show warning before allowing new game start
+
+### Story 5: Developer Extends Framework
 **As a developer**, I want to understand how to add custom game logic beyond payoff matrices, so that I can build more complex games.
 
 **Acceptance Criteria:**
@@ -99,6 +124,7 @@ A **declarative game configuration system** that allows new correspondence games
 - [ ] Custom UI component injection
 - [ ] Documentation with examples
 - [ ] Type definitions exported for plugins
+- [ ] Config can define custom turn object schema
 
 ---
 
@@ -125,6 +151,16 @@ A **declarative game configuration system** that allows new correspondence games
       "type": "highest-total",
       "tiebreaker": "sudden-death-round"
     }
+  },
+  "turnSchema": {
+    "type": "object",
+    "properties": {
+      "choice": {
+        "type": "string",
+        "enum": ["rock", "paper", "scissors"]
+      }
+    },
+    "required": ["choice"]
   },
   "choices": [
     {
@@ -197,6 +233,15 @@ rules:
   winCondition:
     type: highest-total  # or 'first-to-threshold', 'best-of-n'
     tiebreaker: sudden-death-round
+
+# JSON Schema for turn object structure (sent in URLs)
+turnSchema:
+  type: object
+  properties:
+    choice:
+      type: string
+      enum: [rock, paper, scissors]
+  required: [choice]
 
 choices:
   - id: rock
@@ -317,9 +362,9 @@ graph TB
     end
 
     subgraph "State Management"
-        GENERIC_STATE[Generic Game State]
-        URL_GEN[URL Generator]
-        STORAGE[Local Storage]
+        STORAGE[Local Storage<br/>Primary Source of Truth]
+        CHECKSUM[SHA-256 Checksum<br/>Validator]
+        URL_GEN[Delta URL Generator]
     end
 
     subgraph "UI Layer"
@@ -337,108 +382,189 @@ graph TB
     ENGINE --> VALIDATOR_LOGIC
     ENGINE --> WIN
 
-    ENGINE --> GENERIC_STATE
-    GENERIC_STATE --> URL_GEN
-    GENERIC_STATE --> STORAGE
+    ENGINE --> STORAGE
+    STORAGE --> CHECKSUM
+    CHECKSUM --> URL_GEN
 
-    GENERIC_STATE --> GAME_SELECTOR
-    GENERIC_STATE --> CHOICE_UI
-    GENERIC_STATE --> HISTORY_UI
-    GENERIC_STATE --> RESULTS_UI
+    STORAGE --> GAME_SELECTOR
+    STORAGE --> CHOICE_UI
+    STORAGE --> HISTORY_UI
+    STORAGE --> RESULTS_UI
 
     style CONFIG fill:#e1f5e1
     style ENGINE fill:#e1e5f5
-    style GENERIC_STATE fill:#f5e1e1
+    style STORAGE fill:#f5e1e1
 ```
 
-### Data Flow: From Config to Gameplay
+### Data Flow: Delta-Based URL + localStorage Architecture
 
 ```mermaid
 sequenceDiagram
     participant User
     participant App
     participant ConfigLoader
+    participant LocalStorage
+    participant ChecksumValidator
     participant GameEngine
-    participant URLState
+    participant URLGenerator
     participant UI
 
-    User->>App: Opens game URL
-    App->>ConfigLoader: Load game type from URL
-    ConfigLoader->>ConfigLoader: Fetch & validate config
-    ConfigLoader-->>App: Validated GameConfig
+    User->>App: Opens game URL (hash fragment)
+    App->>App: Decrypt & parse URL payload
 
-    App->>URLState: Decrypt game state
-    URLState-->>App: GameState or null
+    alt First URL (Initial Game State)
+        App->>LocalStorage: Check if gameId exists
+        LocalStorage-->>App: Not found
+        App->>App: Determine I am Player 1 (first opener)
+        App->>LocalStorage: Store full game state + metadata
+        LocalStorage-->>App: Stored with initial checksum
+    else Delta URL (Move Update)
+        App->>App: Extract { gameId, playerId, turn, prevChecksum }
+        App->>LocalStorage: Get game state for gameId
+        LocalStorage-->>App: Full game state + metadata
+        App->>LocalStorage: Get my player number
+        LocalStorage-->>App: I am Player 2 (or Player 1)
+        App->>ChecksumValidator: Verify prevChecksum matches
+        ChecksumValidator->>ChecksumValidator: SHA-256(fullState + metadata)
+        ChecksumValidator-->>App: ✓ Valid or ✗ Mismatch
 
-    alt New Game
-        App->>GameEngine: createNewGame(config)
-        GameEngine-->>App: Initial GameState
-    else Existing Game
-        App->>GameEngine: validateState(state, config)
-        GameEngine-->>App: Validated GameState
+        alt Checksum Mismatch
+            App->>User: ERROR: Invalid move (tampering detected)
+            App->>App: Stop execution
+        else Checksum Valid
+            App->>ConfigLoader: Load game config
+            ConfigLoader-->>App: Validated GameConfig
+            App->>GameEngine: Apply turn to state
+            GameEngine->>GameEngine: Validate turn schema
+            GameEngine->>GameEngine: Calculate payoffs if round complete
+            GameEngine-->>App: Updated game state
+            App->>LocalStorage: Save updated state
+            LocalStorage->>ChecksumValidator: Generate new checksum
+            ChecksumValidator-->>LocalStorage: SHA-256 hash
+            LocalStorage-->>App: State saved with new checksum
+        end
     end
 
-    App->>UI: Render game interface
-    UI-->>User: Display choices
+    App->>UI: Render game from localStorage
+    UI-->>User: Display current state + choices
 
     User->>UI: Makes choice
-    UI->>GameEngine: applyChoice(state, playerId, choice)
-    GameEngine->>GameEngine: Calculate payoffs if both chose
-    GameEngine-->>UI: Updated GameState
+    UI->>GameEngine: Apply player's turn
+    GameEngine-->>UI: Updated state
+    UI->>LocalStorage: Save state
+    LocalStorage-->>UI: New checksum generated
 
-    UI->>URLState: generateURL(state, config)
-    URLState-->>UI: Encrypted URL
-    UI-->>User: Display URL to share
+    UI->>URLGenerator: Create delta URL
+    URLGenerator->>URLGenerator: Build { gameId, myPlayerId, myTurn }
+    URLGenerator->>ChecksumValidator: Get current checksum
+    ChecksumValidator-->>URLGenerator: SHA-256 hash
+    URLGenerator->>URLGenerator: Encrypt + compress payload
+    URLGenerator-->>UI: Hash fragment URL
+    UI-->>User: "Send this URL to opponent"
 ```
 
-### Generic Game State Schema
+### localStorage Data Structures
 
 ```typescript
-interface GenericGameState {
-  // Meta
-  version: string;
-  gameType: string;  // References config file
-  gameId: string;
+/**
+ * Complete game record stored in localStorage
+ * Key: `game-{gameId}`
+ * Checksum includes EVERYTHING in this structure
+ */
+interface LocalStorageGameRecord {
+  // Game State (core game data)
+  gameState: GenericGameState;
 
-  // Players
-  players: {
-    p1: PlayerInfo;
-    p2: PlayerInfo;
+  // Metadata (tracked for checksum)
+  metadata: {
+    gameType: string;           // Which config file
+    gameId: string;             // UUID
+    myPlayerNumber: 'p1' | 'p2'; // Who am I in this game
+    myPlayerName: string;        // My display name (cannot change)
+    opponentName?: string;       // Opponent's name
+    createdAt: string;           // ISO timestamp
+    lastMoveAt: string;          // ISO timestamp
+    turnCount: number;           // Total turns taken
   };
 
-  // Game Progress
+  // Checksum (SHA-256 of gameState + metadata)
+  checksum: string;
+}
+
+/**
+ * Generic game state (stored within LocalStorageGameRecord)
+ */
+interface GenericGameState {
+  version: string;               // "1.0.0"
   currentRound: number;
   totalRounds: number;
   gamePhase: 'setup' | 'playing' | 'finished';
 
-  // Rounds (flexible structure)
+  // Rounds with flexible turn structure
   rounds: GenericRound[];
 
-  // Scores (can be any scoring method)
+  // Cumulative scores
   scores: {
-    p1: number | Record<string, number>;
-    p2: number | Record<string, number>;
+    p1: number;
+    p2: number;
   };
-
-  // Optional features
-  metadata: GameMetadata;
-  socialFeatures?: SocialFeatures;
 }
 
+/**
+ * Generic round (turn structure defined by game config)
+ */
 interface GenericRound {
   roundNumber: number;
-  choices: {
-    p1?: string;  // Choice ID from config
-    p2?: string;
+  turns: {
+    p1?: any;  // Validated against config.turnSchema
+    p2?: any;  // Validated against config.turnSchema
   };
   results?: {
     p1Score: number;
     p2Score: number;
-    metadata?: Record<string, any>;  // For game-specific data
   };
   isComplete: boolean;
   completedAt?: string;
 }
+```
+
+### URL Payload Structures
+
+```typescript
+/**
+ * Initial URL payload (first game creation)
+ * Contains full state since recipient has no localStorage
+ */
+interface InitialURLPayload {
+  type: 'initial';
+  gameType: string;
+  gameState: GenericGameState;
+  metadata: {
+    gameId: string;
+    createdAt: string;
+    p1Name?: string;
+    p2Name?: string;
+  };
+  checksum: string;  // Checksum of initial state
+}
+
+/**
+ * Delta URL payload (subsequent moves)
+ * Only contains latest turn + verification
+ */
+interface DeltaURLPayload {
+  type: 'delta';
+  gameId: string;
+  playerId: 'p1' | 'p2';
+  turn: any;  // Structure defined by config.turnSchema
+  previousChecksum: string;  // For verification
+}
+
+/**
+ * Encrypted URL structure (what actually goes in hash fragment)
+ * After compression and encryption of above payloads
+ */
+type EncryptedURLFragment = string;  // base64(encrypted(compressed(payload)))
 ```
 
 ### Configuration Schema (Zod)
@@ -468,6 +594,13 @@ export const GameConfigSchema = z.object({
       threshold: z.number().optional(),
       tiebreaker: z.enum(['sudden-death-round', 'declare-tie']).optional(),
     }),
+  }),
+
+  // JSON Schema definition for turn object structure
+  turnSchema: z.object({
+    type: z.literal('object'),
+    properties: z.record(z.any()),
+    required: z.array(z.string()).optional(),
   }),
 
   choices: z.array(
@@ -632,47 +765,413 @@ class GameConfigLoader {
 }
 ```
 
-### URL Generation with Game Type
+### localStorage Manager with Checksum
 
 ```typescript
-interface URLGenerationOptions {
-  gameType: string;
-  gameState: GenericGameState;
-  config: GameConfig;
-}
+class LocalStorageGameManager {
+  /**
+   * Saves game to localStorage and generates checksum
+   */
+  saveGame(record: LocalStorageGameRecord): void {
+    // Generate SHA-256 checksum of entire record (minus checksum field)
+    const checksum = this.generateChecksum(record);
 
-function generateGameURL(options: URLGenerationOptions): string {
-  const { gameType, gameState, config } = options;
+    const recordWithChecksum = {
+      ...record,
+      checksum,
+    };
 
-  // Compress state
-  const compressed = compressState(gameState, config);
-
-  // Encrypt
-  const encrypted = encryptState(compressed);
-
-  // Build URL with game type parameter
-  const baseUrl = window.location.origin + window.location.pathname;
-  const url = `${baseUrl}?type=${gameType}&s=${encrypted}`;
-
-  return url;
-}
-
-function parseGameURL(url: string): {
-  gameType: string;
-  gameState: GenericGameState | null;
-} {
-  const params = new URLSearchParams(new URL(url).search);
-  const gameType = params.get('type') || 'prisoners-dilemma';  // Default
-  const stateParam = params.get('s');
-
-  if (!stateParam) {
-    return { gameType, gameState: null };
+    const key = `game-${record.metadata.gameId}`;
+    localStorage.setItem(key, JSON.stringify(recordWithChecksum));
   }
 
-  // Decrypt and decompress
-  const gameState = decryptState(stateParam);
+  /**
+   * Loads game from localStorage and verifies checksum
+   */
+  loadGame(gameId: string): LocalStorageGameRecord | null {
+    const key = `game-${gameId}`;
+    const raw = localStorage.getItem(key);
 
-  return { gameType, gameState };
+    if (!raw) return null;
+
+    const record: LocalStorageGameRecord = JSON.parse(raw);
+
+    // Verify checksum
+    const expectedChecksum = this.generateChecksum(record);
+    if (record.checksum !== expectedChecksum) {
+      throw new Error('localStorage corruption detected');
+    }
+
+    return record;
+  }
+
+  /**
+   * Generates SHA-256 checksum of game record
+   * Includes: gameState + metadata (but NOT checksum field)
+   */
+  async generateChecksum(record: Omit<LocalStorageGameRecord, 'checksum'>): Promise<string> {
+    const dataToHash = {
+      gameState: record.gameState,
+      metadata: record.metadata,
+    };
+
+    const jsonString = JSON.stringify(dataToHash);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(jsonString);
+
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    return hashHex;
+  }
+
+  /**
+   * Delete finished games from localStorage
+   */
+  deleteFinishedGames(): void {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('game-'));
+
+    for (const key of keys) {
+      const record = this.loadGame(key.replace('game-', ''));
+      if (record && record.gameState.gamePhase === 'finished') {
+        localStorage.removeItem(key);
+      }
+    }
+  }
+
+  /**
+   * Export game as downloadable JSON
+   */
+  exportGame(gameId: string): Blob {
+    const record = this.loadGame(gameId);
+    if (!record) throw new Error('Game not found');
+
+    const json = JSON.stringify(record, null, 2);
+    return new Blob([json], { type: 'application/json' });
+  }
+}
+```
+
+### URL Generation: Delta-Based System
+
+```typescript
+class DeltaURLGenerator {
+  constructor(
+    private storageManager: LocalStorageGameManager,
+    private config: GameConfig
+  ) {}
+
+  /**
+   * Generates initial URL for new game (full state)
+   */
+  async generateInitialURL(
+    gameType: string,
+    gameState: GenericGameState,
+    metadata: LocalStorageGameRecord['metadata']
+  ): Promise<string> {
+    // Create payload with full state
+    const payload: InitialURLPayload = {
+      type: 'initial',
+      gameType,
+      gameState,
+      metadata: {
+        gameId: metadata.gameId,
+        createdAt: metadata.createdAt,
+        p1Name: metadata.myPlayerName,
+        p2Name: metadata.opponentName,
+      },
+      checksum: await this.storageManager.generateChecksum({
+        gameState,
+        metadata,
+      }),
+    };
+
+    return this.encryptAndBuildURL(payload);
+  }
+
+  /**
+   * Generates delta URL with only latest move
+   */
+  async generateDeltaURL(
+    gameId: string,
+    playerId: 'p1' | 'p2',
+    turn: any
+  ): Promise<string> {
+    // Get current state from localStorage
+    const record = this.storageManager.loadGame(gameId);
+    if (!record) throw new Error('Game not found in localStorage');
+
+    // Create payload with delta
+    const payload: DeltaURLPayload = {
+      type: 'delta',
+      gameId,
+      playerId,
+      turn,
+      previousChecksum: record.checksum,
+    };
+
+    return this.encryptAndBuildURL(payload);
+  }
+
+  /**
+   * Encrypts payload and builds hash fragment URL
+   */
+  private async encryptAndBuildURL(
+    payload: InitialURLPayload | DeltaURLPayload
+  ): Promise<string> {
+    // Serialize
+    const json = JSON.stringify(payload);
+
+    // Compress (using lz-string as per framework docs)
+    const compressed = LZString.compressToEncodedURIComponent(json);
+
+    // Encrypt (using Crypto-JS AES as per framework docs)
+    const encrypted = CryptoJS.AES.encrypt(compressed, this.config.secret).toString();
+
+    // Base64 encode
+    const encoded = btoa(encrypted);
+
+    // Build URL with hash fragment (no readable data)
+    const baseUrl = window.location.origin + window.location.pathname;
+    return `${baseUrl}#${encoded}`;
+  }
+
+  /**
+   * Parses URL and extracts payload
+   */
+  static async parseURL(url: string, secret: string): Promise<{
+    payload: InitialURLPayload | DeltaURLPayload;
+    gameType: string;
+  }> {
+    // Extract hash fragment
+    const hash = new URL(url).hash.substring(1);
+    if (!hash) throw new Error('No data in URL');
+
+    // Decode base64
+    const encrypted = atob(hash);
+
+    // Decrypt
+    const decrypted = CryptoJS.AES.decrypt(encrypted, secret).toString(CryptoJS.enc.Utf8);
+
+    // Decompress
+    const json = LZString.decompressFromEncodedURIComponent(decrypted);
+
+    // Parse
+    const payload = JSON.parse(json);
+
+    // Extract game type
+    const gameType = payload.type === 'initial'
+      ? payload.gameType
+      : undefined; // Delta URLs don't contain gameType, must get from localStorage
+
+    return { payload, gameType };
+  }
+}
+```
+
+---
+
+## Game Lifecycle: Download & Cleanup
+
+### Complete Game Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> GameCreation: P1 creates game
+    GameCreation --> P1WaitingForP2: Generate initial URL
+    P1WaitingForP2 --> P2FirstMove: P2 opens URL, becomes P2
+    P2FirstMove --> P1Response: P2 makes choice, sends delta URL
+    P1Response --> P2Response: P1 makes choice, sends delta URL
+    P2Response --> RoundComplete: Both chose
+    RoundComplete --> NextRound: More rounds remaining
+    NextRound --> P1Response
+    RoundComplete --> GameFinished: All rounds complete
+
+    GameFinished --> ResultsScreen: Show winner & scores
+    ResultsScreen --> DownloadPrompt: "Download your game?"
+    DownloadPrompt --> Downloaded: User downloads JSON
+    DownloadPrompt --> NotDownloaded: User skips download
+
+    Downloaded --> InLocalStorage: Game still stored
+    NotDownloaded --> InLocalStorage: Game still stored
+
+    InLocalStorage --> NewGameWarning: User starts new game
+    NewGameWarning --> DeletedFromStorage: Auto-delete finished games
+    DeletedFromStorage --> [*]: Game removed
+```
+
+### localStorage Lifecycle States
+
+```typescript
+type GameLifecycleState =
+  | 'creating'      // P1 just created, not sent yet
+  | 'awaiting-p2'   // Initial URL sent, waiting for P2
+  | 'in-progress'   // Both players active, game ongoing
+  | 'finished'      // All rounds complete, winner determined
+  | 'archived';     // Downloaded by user (optional future state)
+
+interface GameLifecycleMetadata {
+  state: GameLifecycleState;
+  createdAt: string;
+  finishedAt?: string;
+  downloadedAt?: string;
+  lastAccessedAt: string;
+}
+```
+
+### Download & Cleanup Flow
+
+#### When Game Finishes
+
+1. **Results Screen** shows:
+   - Final scores
+   - Winner announcement
+   - Complete round history
+   - Download button (prominent)
+   - Warning: "This game will be deleted when you start a new game"
+
+2. **Download Button** behavior:
+   ```typescript
+   function handleDownload(gameId: string) {
+     const manager = new LocalStorageGameManager();
+     const blob = manager.exportGame(gameId);
+
+     // Generate filename with timestamp
+     const timestamp = new Date().toISOString().split('T')[0];
+     const filename = `${gameType}-${gameId.slice(0, 8)}-${timestamp}.json`;
+
+     // Trigger download
+     const url = URL.createObjectURL(blob);
+     const a = document.createElement('a');
+     a.href = url;
+     a.download = filename;
+     a.click();
+     URL.revokeObjectURL(url);
+
+     // Game remains in localStorage (not deleted)
+     // User can download multiple times
+   }
+   ```
+
+3. **Downloaded File Format**:
+   ```json
+   {
+     "gameState": { ...full game state... },
+     "metadata": {
+       "gameType": "rock-paper-scissors",
+       "gameId": "abc-123-def",
+       "myPlayerNumber": "p1",
+       "myPlayerName": "Alice",
+       "opponentName": "Bob",
+       "createdAt": "2025-10-04T12:00:00Z",
+       "lastMoveAt": "2025-10-04T12:15:00Z",
+       "turnCount": 2
+     },
+     "checksum": "sha256-hash-of-state-and-metadata",
+     "exportedAt": "2025-10-04T12:16:00Z",
+     "frameworkVersion": "1.0.0"
+   }
+   ```
+
+#### When Starting New Game
+
+1. **Before Creating Game**:
+   ```typescript
+   function startNewGame(gameType: string) {
+     const manager = new LocalStorageGameManager();
+
+     // Check for finished games
+     const finishedGames = manager.getFinishedGames();
+
+     if (finishedGames.length > 0) {
+       // Show warning modal
+       showWarning({
+         title: "Finished games will be deleted",
+         message: `You have ${finishedGames.length} finished game(s). They will be automatically deleted. Download them first?`,
+         actions: [
+           { label: "Download All", action: () => downloadAllAndContinue() },
+           { label: "Continue Without Downloading", action: () => deleteAndContinue() },
+           { label: "Cancel", action: () => cancelNewGame() }
+         ]
+       });
+     } else {
+       // No finished games, proceed
+       createNewGame(gameType);
+     }
+   }
+
+   function deleteAndContinue() {
+     const manager = new LocalStorageGameManager();
+     manager.deleteFinishedGames();
+     createNewGame(gameType);
+   }
+   ```
+
+2. **Auto-Delete Logic**:
+   ```typescript
+   class LocalStorageGameManager {
+     getFinishedGames(): LocalStorageGameRecord[] {
+       const keys = Object.keys(localStorage)
+         .filter(k => k.startsWith('game-'));
+
+       return keys
+         .map(k => this.loadGame(k.replace('game-', '')))
+         .filter(g => g && g.gameState.gamePhase === 'finished');
+     }
+
+     deleteFinishedGames(): void {
+       const finished = this.getFinishedGames();
+       finished.forEach(game => {
+         localStorage.removeItem(`game-${game.metadata.gameId}`);
+       });
+     }
+   }
+   ```
+
+### Storage Management
+
+#### Preventing Quota Exceeded
+
+```typescript
+function saveGameWithQuotaCheck(record: LocalStorageGameRecord): void {
+  try {
+    localStorage.setItem(`game-${record.metadata.gameId}`, JSON.stringify(record));
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      // Auto-delete finished games
+      this.deleteFinishedGames();
+
+      // Try again
+      try {
+        localStorage.setItem(`game-${record.metadata.gameId}`, JSON.stringify(record));
+      } catch (e2) {
+        // Still failed - show error
+        throw new Error('Storage full. Please download and delete some games manually.');
+      }
+    } else {
+      throw e;
+    }
+  }
+}
+```
+
+#### Manual Game Management (Future Enhancement)
+
+```typescript
+// Optional: User-facing game list UI
+interface GameListItem {
+  gameId: string;
+  gameType: string;
+  opponent: string;
+  status: 'in-progress' | 'finished';
+  lastPlayed: string;
+  size: number; // bytes
+}
+
+function listAllGames(): GameListItem[] {
+  // Scan localStorage and return list
+  // User can manually delete or download individual games
 }
 ```
 
@@ -813,71 +1312,80 @@ npm run test -- game-engine/loaders
 npm run validate-configs
 ```
 
-### Phase 2: Core Engine (Week 2)
+### Phase 2: Core Engine + localStorage (Week 2)
 
-**Goal**: Generic game logic engine
+**Goal**: Generic game logic engine with localStorage and checksum system
 
 **Tasks**:
 1. Create `GameEngine` class with config-driven logic
 2. Implement generic payoff calculator
 3. Build generic state machine (rounds, turns, completion)
-4. Adapt URL generation for game type parameter
-5. Create generic state schema alongside existing one
+4. Implement `LocalStorageGameManager` with SHA-256 checksum
+5. Create `DeltaURLGenerator` for delta-based URLs
+6. Build turn schema validation system
 
 **Deliverables**:
 - `src/features/game-engine/core/GameEngine.ts`
 - `src/features/game-engine/core/payoffEngine.ts`
+- `src/features/game-engine/storage/LocalStorageGameManager.ts`
+- `src/features/game-engine/urls/DeltaURLGenerator.ts`
 - `src/features/game-engine/schemas/genericGameState.ts`
 
 **Validation**:
 ```bash
 npm run test -- game-engine/core
-# All tests should pass for RPS and PD configs
+npm run test -- game-engine/storage
+# Test checksum stability and URL delta generation
 ```
 
-### Phase 3: UI Adaptation (Week 2-3)
+### Phase 3: UI Adaptation + Download (Week 2-3)
 
-**Goal**: Dynamic UI components
+**Goal**: Dynamic UI components and game lifecycle management
 
 **Tasks**:
 1. Create `<GenericChoiceInterface>` component
 2. Build `<DynamicPayoffMatrix>` component
-3. Implement game selector UI for homepage
-4. Add theme system for different visual styles
-5. Create generic messaging system with config templates
+3. Implement `<GameResults>` component with download button
+4. Add "Starting new game will delete finished games" warning
+5. Implement game export/download functionality
+6. Create checksum error UI (tampering detected)
 
 **Deliverables**:
 - `src/features/game-engine/components/GenericChoiceInterface.tsx`
 - `src/features/game-engine/components/DynamicPayoffMatrix.tsx`
-- `src/features/game-engine/components/GameSelector.tsx`
+- `src/features/game-engine/components/GameResults.tsx`
+- `src/features/game-engine/components/DownloadButton.tsx`
 
 **Validation**:
 - Manual testing with RPS config
-- Visual regression tests
+- Test download on desktop and mobile
+- Test checksum mismatch error handling
 - Accessibility audit
 
-### Phase 4: Migration & Testing (Week 3-4)
+### Phase 4: Game Creation & Testing (Week 3-4)
 
-**Goal**: Migrate existing PD, validate with new game
+**Goal**: Create PD and RPS from configs, validate entire system
 
 **Tasks**:
-1. Create `prisoners-dilemma.yaml` config file
-2. Update App.tsx to use GameEngine for both modes
-3. Ensure existing PD URLs still work (backward compatibility)
-4. Create complete Rock-Paper-Scissors game
-5. End-to-end testing of both games
+1. Create `prisoners-dilemma.yaml` config file (fresh start, no migration)
+2. Create `rock-paper-scissors.yaml` config file
+3. Update App.tsx to use new delta URL + localStorage system
+4. Test complete game flow: P1 creates → P2 joins → game complete → download
+5. Test checksum validation on every move
+6. End-to-end testing of both games
 
 **Deliverables**:
-- Migrated Prisoner's Dilemma
-- Fully functional Rock-Paper-Scissors
-- Backward compatibility layer
-- E2E test suite
+- `games/configs/prisoners-dilemma.yaml`
+- `games/configs/rock-paper-scissors.yaml`
+- Complete App.tsx refactor
+- E2E test suite covering delta URLs and checksum validation
 
 **Validation**:
 ```bash
 npm run test:e2e -- prisoners-dilemma
 npm run test:e2e -- rock-paper-scissors
-npm run test:integration -- all-games
+npm run test:integration -- checksum-validation
+npm run test:integration -- localStorage-manager
 ```
 
 ### Phase 5: Enhancement & Documentation (Week 4-5)
@@ -903,17 +1411,22 @@ npm run test:integration -- all-games
 ## Implementation Priority
 
 ### MVP (Minimum Viable Product)
-1. ✅ Config loader with validation
+1. ✅ Config loader with validation + turnSchema support
 2. ✅ Generic game engine core
-3. ✅ Basic dynamic UI (choice buttons, payoff matrix)
-4. ✅ Rock-Paper-Scissors working example
-5. ✅ Prisoner's Dilemma migrated to config
+3. ✅ localStorage manager with SHA-256 checksum verification
+4. ✅ Delta URL generation/parsing
+5. ✅ Basic dynamic UI (choice buttons, payoff matrix, results)
+6. ✅ Game download feature
+7. ✅ Finished game cleanup on new game start
+8. ✅ Rock-Paper-Scissors working example
+9. ✅ Prisoner's Dilemma created from config
 
 ### Enhanced Features
-- [ ] Game selector homepage
+- [ ] Game selector homepage (list all config files)
 - [ ] Multiple themes (dungeon, classic, modern)
-- [ ] Advanced win conditions
-- [ ] Custom validators
+- [ ] Advanced win conditions (first-to-threshold, best-of-n)
+- [ ] Custom validators via plugins
+- [ ] Import downloaded game files
 
 ### Future Enhancements
 - [ ] Multi-round games with different choice sets per round
@@ -928,16 +1441,27 @@ npm run test:integration -- all-games
 
 ### Technical Risks
 
-#### Risk 1: URL Length with Complex Games
-**Scenario**: Game with 10 choices and 20 rounds exceeds URL limit
+#### Risk 1: localStorage Loss / Cross-Device Play
+**Scenario**: User clears browser cache or tries to continue game on different device
+
+**Impact**: Game cannot be resumed (delta URLs need localStorage)
 
 **Mitigation**:
-- Use choice IDs (e.g., `"r"` instead of `"rock"`) for compression
-- Store only move history, not full state
-- Warning system for config validation
-- Fallback to localStorage + short code
+- **Accepted limitation**: Document clearly that games are device-specific
+- **First URL is complete**: Initial URL contains full state for P2
+- **Download feature**: Users can export finished games before cleanup
+- **Clear messaging**: "This game is stored on your device" warning
 
-#### Risk 2: Type Safety with Dynamic Configs
+#### Risk 2: Checksum Mismatch False Positives
+**Scenario**: Legitimate game state triggers checksum validation failure
+
+**Mitigation**:
+- **Deterministic JSON serialization**: Use canonical JSON stringify
+- **Comprehensive testing**: Test checksum stability across scenarios
+- **Clear error messages**: "Game state validation failed - possible tampering"
+- **Debugging mode**: Optional checksum bypass for development
+
+#### Risk 3: Type Safety with Dynamic Configs
 **Scenario**: TypeScript can't validate dynamically loaded configs
 
 **Mitigation**:
@@ -946,14 +1470,14 @@ npm run test:integration -- all-games
 - Comprehensive test coverage
 - Clear error messages for config issues
 
-#### Risk 3: Backward Compatibility
-**Scenario**: Existing PD URLs break after migration
+#### Risk 4: Turn Schema Validation Failures
+**Scenario**: Player sends invalid turn object that doesn't match config.turnSchema
 
 **Mitigation**:
-- Detect old URL format (no `type` param)
-- Default to PD config for legacy URLs
-- State migration layer
-- Extensive regression testing
+- **Runtime validation**: Validate turn against JSON Schema before applying
+- **Clear error UI**: "Invalid move format" with details
+- **Fallback**: Reject turn, don't update localStorage
+- **Testing**: Generate test cases from turnSchema
 
 ### Edge Cases to Handle
 
@@ -983,13 +1507,25 @@ payoffMatrix:
 #### Gameplay Edge Cases
 - **All ties**: Game where every combination is 0,0
 - **No winning moves**: Payoff matrix with only negative values
-- **Extremely long games**: 100+ rounds
+- **Extremely long games**: 100+ rounds (localStorage can handle, no URL limit)
 - **Single choice**: Game with only 1 option (trivial but valid)
+
+#### localStorage Edge Cases
+- **Quota exceeded**: localStorage full when saving game
+  - Mitigation: Auto-delete finished games before saving new state
+  - Show warning: "Storage full - download finished games"
+- **Corrupted data**: JSON.parse fails on stored game
+  - Mitigation: Try-catch with graceful error, offer to delete corrupted entry
+- **Checksum in URL doesn't match localStorage**: Opponent modified move
+  - Mitigation: Hard fail with error message, don't apply move
+- **gameId exists but I haven't opened it yet**: Second player opening initial URL
+  - Mitigation: Check if my player number is set; if not, assign P2
 
 #### UI Edge Cases
 - **Very long choice names**: "The extremely verbose choice that breaks layout"
 - **No emojis**: Fallback to text-only display
 - **Too many choices**: 20+ choices in matrix (layout challenge)
+- **Download on mobile**: Ensure blob download works on iOS/Android
 
 ---
 
@@ -999,10 +1535,11 @@ payoffMatrix:
 
 **Framework Functionality**:
 - [ ] Rock-Paper-Scissors playable via config
-- [ ] Prisoner's Dilemma migrated to config
-- [ ] All existing tests passing
+- [ ] Prisoner's Dilemma created from config (no migration - fresh start)
+- [ ] localStorage + checksum system working
+- [ ] Delta URL generation/parsing functional
 - [ ] E2E tests for both games
-- [ ] URL generation/parsing works for both
+- [ ] Game download feature working
 
 **Developer Experience**:
 - [ ] Create new game in < 30 minutes
@@ -1022,7 +1559,8 @@ payoffMatrix:
 - **Game Creation Time**: Baseline 3 hours → Target < 30 minutes
 - **Code Reuse**: 80%+ of framework code shared
 - **Config Errors**: 100% caught with clear messages
-- **URL Size**: Maintain < 1500 chars for 5-round games
+- **URL Size**: Delta URLs < 500 chars (only move + checksum)
+- **Checksum Verification**: 100% success rate for valid moves, 0% false positives
 
 **Quality Metrics**:
 - **Test Coverage**: > 80% for game engine
@@ -1184,7 +1722,37 @@ After this PRD is approved:
 
 ---
 
-**Document Version**: 1.0.0
+**Document Version**: 2.0.0
 **Created**: 2025-10-04
+**Last Updated**: 2025-10-04
 **Status**: Draft - Awaiting Review
 **Next Review**: Implementation PRP Creation
+
+---
+
+## Document Changelog
+
+### Version 2.0.0 (2025-10-04)
+**Major architectural changes - localStorage-first with delta URLs**
+
+- **BREAKING**: Removed backward compatibility with existing Prisoner's Dilemma
+- **Added**: localStorage as primary source of truth for game state
+- **Added**: SHA-256 checksum verification system for move validation
+- **Added**: Delta-based URL system (only latest move in URL, not full state)
+- **Added**: Turn schema definition in game configs (JSON Schema)
+- **Added**: Game download feature (export to JSON file)
+- **Added**: Automatic cleanup of finished games when starting new game
+- **Added**: Player assignment logic (first opener = P1, second = P2)
+- **Changed**: URL structure to hash fragment with encrypted payload
+- **Changed**: Initial URLs contain full state, subsequent URLs contain deltas
+- **Changed**: Implementation phases to reflect new architecture
+- **Changed**: Risk analysis to focus on localStorage and checksum validation
+- **Added**: Complete game lifecycle documentation with state diagrams
+- **Added**: localStorage management strategies (quota handling, corruption recovery)
+
+### Version 1.0.0 (2025-10-04)
+**Initial draft**
+
+- Initial PRD for configurable game framework
+- Full-state URL approach (deprecated in v2.0)
+- Backward compatibility requirements (removed in v2.0)
