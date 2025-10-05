@@ -12,15 +12,15 @@
  *
  * CRITICAL: All external data MUST be validated after decryption
  *
- * TODO: Add HMAC signature generation and verification
- * Current implementation only has encryption (confidentiality)
- * Need to add HMAC for integrity verification (see PRD section on DeltaURLGenerator)
+ * HMAC implementation added via hmacManager module
+ * URL format: encrypted_data.hmac_signature
  */
 
 import CryptoJS from 'crypto-js';
 import LZString from 'lz-string';
 import { GameState, validateGameState } from '../schemas/gameSchema';
 import { GAME_SECRET } from '../../../shared/utils/constants';
+import { signData, encodeSignedData, decodeSignedData } from '../../../framework/storage/hmacManager';
 
 /**
  * Error thrown when encryption operations fail
@@ -45,13 +45,14 @@ export class DecryptionError extends Error {
 /**
  * Encrypts game state for URL sharing
  *
- * Pipeline: GameState -> JSON -> Compress (LZ-String) -> Encrypt (AES) -> Base64
+ * Pipeline: GameState -> JSON -> Compress (LZ-String) -> Encrypt (AES) -> Base64 -> HMAC Sign
  *
  * CRITICAL: Uses compressToEncodedURIComponent for URL-safe output
  * CRITICAL: Proper UTF8 encoding is essential for Crypto-JS
+ * CRITICAL: HMAC signature added for integrity verification
  *
  * @param gameState - The game state to encrypt
- * @returns Base64-encoded encrypted string suitable for URLs
+ * @returns Signed and encrypted string suitable for URLs (format: data.signature)
  * @throws {EncryptionError} If encryption fails at any step
  *
  * @example
@@ -78,7 +79,12 @@ export function encryptGameState(gameState: GameState): string {
     // Using btoa for browser compatibility
     const encoded = btoa(encrypted);
 
-    return encoded;
+    // Step 5: Add HMAC signature for integrity verification
+    // Sign the encoded data and format as data.signature
+    const signed = signData(encoded);
+    const signedString = encodeSignedData(signed);
+
+    return signedString;
   } catch (error) {
     throw new EncryptionError('Failed to encrypt game state', error);
   }
@@ -87,14 +93,15 @@ export function encryptGameState(gameState: GameState): string {
 /**
  * Decrypts game state from URL parameter
  *
- * Pipeline: Base64 -> Decrypt (AES) -> Decompress (LZ-String) -> JSON -> Validate
+ * Pipeline: Verify HMAC -> Base64 -> Decrypt (AES) -> Decompress (LZ-String) -> JSON -> Validate
  *
+ * CRITICAL: HMAC verification happens BEFORE decryption
  * CRITICAL: Always validates with Zod schema after decryption
  * CRITICAL: UTF8 encoding must be specified for Crypto-JS decrypt
  *
- * @param encoded - Base64-encoded encrypted string from URL
+ * @param encoded - Signed and encrypted string from URL (format: data.signature)
  * @returns Validated game state
- * @throws {DecryptionError} If decryption fails
+ * @throws {DecryptionError} If HMAC verification or decryption fails
  * @throws {z.ZodError} If validation fails (invalid game state)
  *
  * @example
@@ -116,8 +123,12 @@ export function encryptGameState(gameState: GameState): string {
  */
 export function decryptGameState(encoded: string): GameState {
   try {
+    // Step 0: Verify HMAC signature and extract encrypted data
+    // CRITICAL: Do this BEFORE any decryption attempt
+    const verified = decodeSignedData(encoded);
+
     // Step 1: Base64 decode
-    const encrypted = atob(encoded);
+    const encrypted = atob(verified);
 
     // Step 2: Decrypt using AES-256
     // CRITICAL: Must use CryptoJS.enc.Utf8 for proper string decoding
