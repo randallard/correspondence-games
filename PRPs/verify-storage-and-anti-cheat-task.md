@@ -21,6 +21,7 @@ description: |
 3. All existing game functionality continues to work
 4. Clear error messaging for blocked retry attempts
 5. Implementation matches "middle of the road" security approach (not foolproof, but reasonable deterrent)
+6. **Positive intent UX**: Players who reload URLs after making a choice see their locked choice and URL to share (not choice buttons)
 
 ---
 
@@ -65,7 +66,16 @@ DESIGNED:                           ACTUAL:
 
 **User's Request**: "Use browser storage as a simple way to make sure players cannot re-try a different choice in the same round as a way to cheat - I know this isn't fool proof but it's a middle of the road that gets us a little of the way there"
 
-**Attack Scenario to Prevent**:
+**Attack Scenarios to Prevent**:
+
+**Scenario 1: Back Button Time Travel**
+1. Player 1 makes a choice (e.g., "cooperate") → URL updates
+2. Player 1 sees opponent's choice, regrets their decision
+3. **Player 1 hits browser back button** → Returns to pre-choice URL
+4. Player 1 tries to choose "defect" instead
+5. This allows Player 1 to "time travel" and cheat
+
+**Scenario 2: URL Manipulation**
 1. Player 1 makes a choice (e.g., "cooperate")
 2. Player 1 generates URL and sends to Player 2
 3. Player 2 makes their choice
@@ -73,12 +83,68 @@ DESIGNED:                           ACTUAL:
 5. **Player 1 modifies URL or clears browser and tries different choice**
 6. This allows Player 1 to "time travel" and cheat
 
+**Scenario 3: Page Refresh**
+1. Player 1 makes a choice
+2. Player 1 refreshes page (hoping to reset)
+3. Player 1 tries to make different choice
+
 **Desired Behavior**:
 - Once a player makes a choice for round N, that choice is locked in localStorage
 - If player tries to change their choice for the same round, show error
-- Choice lock persists across page reloads
+- Choice lock persists across:
+  - ✅ Page reloads/refreshes
+  - ✅ **Back button navigation**
+  - ✅ Forward button navigation
+  - ✅ URL hash changes
+  - ✅ Browser restarts (localStorage persists)
 - Choice lock includes: gameId + roundNumber + playerNumber
 - Implementation should be "reasonable deterrent" not "Fort Knox"
+
+**How localStorage Blocks Back Button Cheating**:
+```
+Timeline:
+1. URL: #empty → Player chooses "rock" → localStorage: {choice: "rock"}
+2. URL: #rock-chosen (browser history entry created)
+3. Player hits BACK → URL: #empty (history navigates back)
+4. useEffect detects hash change → Re-renders UI for empty state
+5. BUT localStorage still has: {round: 1, player: 1, choice: "rock"}
+6. UI checks localStorage → Detects lock → Shows locked choice display
+7. ✅ Back button is neutralized by localStorage persistence!
+```
+
+**Key Insight**: URL state is ephemeral (controlled by browser history), but localStorage state persists. The lock in localStorage "survives" back button navigation.
+
+**URL Re-Loading Behavior** (Positive Intent Assumption):
+- If player reloads the URL from the other player AFTER already making their choice:
+  - ✅ **Show their locked choice** (not the choice UI)
+  - ✅ **Show the URL they need to send** to the other player
+  - ✅ **Display the same screen** they saw after making their choice
+  - ❌ **Do NOT allow re-choosing** (even with same choice UI visible)
+  - 💡 **Assume positive intent**: Player wants to re-send URL or verify their choice
+
+**Example Flow**:
+```
+1. Player 1 makes choice "cooperate" → Sees "Choice made: cooperate" + URL to share
+2. Player 1 sends URL to Player 2
+3. Player 2 clicks URL, makes choice "defect" → Generates new URL with both choices
+4. Player 1 clicks Player 2's URL (to see result or re-send)
+5. ✅ App detects: "I already chose for this round"
+6. ✅ App shows: "Your choice: cooperate" + original URL Player 1 sent
+7. ❌ App does NOT show: Choice buttons (even though URL shows opponent chose)
+```
+
+**Implementation Insight**: You're correct that this behavior may already be implicit in the full PRD-compliant localStorage-first design. The PRD specifies:
+- localStorage stores full game state
+- URLs contain only deltas (latest move)
+- App checks localStorage first, then merges URL delta
+
+If we were to implement the full PRD specification:
+1. App loads → Checks localStorage for gameId
+2. If found → Loads full state from localStorage (including Player 1's choice)
+3. URL only provides Player 2's new move
+4. App would naturally show Player 1's locked choice since it's in localStorage
+
+However, current implementation uses full state in URLs with no localStorage, so this behavior must be explicitly implemented via choice locking. Future migration to full PRD spec would make this more natural.
 
 ### Pattern Examples
 
@@ -260,6 +326,18 @@ function isLocalStorageAvailable() {
     return false;
   }
 }
+
+// CRITICAL: Back Button with Hash-Based Routing
+// Apps using window.location.hash create browser history entries
+// Back button navigates through hash history, NOT server pages
+// Solution: localStorage persists across hash changes
+const hash1 = '#empty-state';
+const hash2 = '#choice-made';
+window.location.hash = hash2; // Browser history: [hash1, hash2]
+// User hits BACK → window.location.hash = hash1
+// useEffect detects hash change → Re-renders
+// BUT localStorage still has lock → Shows locked choice
+// ✅ Back button defeated by localStorage persistence!
 ```
 
 ### Integration Points
@@ -686,6 +764,17 @@ function App() {
     clearLocks
   } = useChoiceLock(gameId, currentRound, currentPlayer);
 
+  // NEW: Check if player already made choice on mount (URL re-load scenario)
+  // This also handles back button navigation since hash changes trigger re-render
+  useEffect(() => {
+    if (gameState && urlState && isLocked && lockedChoice) {
+      // Player is re-loading opponent's URL but already made their choice
+      // OR player used back button to navigate to previous URL
+      // Show them their locked choice instead of allowing new choice
+      console.log('Player already made choice:', lockedChoice.choiceId);
+    }
+  }, [gameState, urlState, isLocked, lockedChoice]);
+
   // ... rest of component
 }
 ```
@@ -759,18 +848,51 @@ const makeNextChoiceAfterResults = useCallback((choiceId: string) => {
 }, [gameState, config, validateAndLock]); // Add validateAndLock to deps
 ```
 
-**CHANGE 6**: Add UI indicator for locked choices (optional but recommended)
+**CHANGE 6**: Add UI logic for locked choice display (REQUIRED for positive intent UX)
 
 ```typescript
-// In the render section where choices are shown
-{isLocked && lockedChoice && (
-  <div className="choice-locked-notice">
-    ℹ️ Choice locked: {lockedChoice.choiceId}
-    <br />
-    <small>You cannot change this choice</small>
+// In the render section - REPLACE choice buttons with locked choice display
+// when player has already made choice for this round
+
+{/* Show locked choice instead of choice buttons if already chosen */}
+{isLocked && lockedChoice ? (
+  <div className="choice-locked-display">
+    <h3>Your Choice for Round {currentRound}</h3>
+    <div className="locked-choice-card">
+      <span className="choice-icon">
+        {config.choices.find(c => c.id === lockedChoice.choiceId)?.icon}
+      </span>
+      <p className="choice-label">
+        {config.choices.find(c => c.id === lockedChoice.choiceId)?.label}
+      </p>
+      <p className="locked-indicator">🔒 Locked</p>
+    </div>
+
+    {/* Show URL to share */}
+    <div className="url-reminder">
+      <p>Share this URL with your opponent:</p>
+      <URLSharer gameState={gameState} />
+      <small>
+        💡 Your choice is locked. Reload this page if you need to copy the URL again.
+      </small>
+    </div>
   </div>
+) : (
+  // Show choice buttons only if NOT locked
+  <DynamicChoiceBoard
+    config={config}
+    onChoiceSelected={(choice) => makeChoice(currentPlayer, choice)}
+    playerNumber={currentPlayer}
+  />
 )}
 ```
+
+**UI Implementation Notes**:
+- When `isLocked && lockedChoice` is true, render locked choice display instead of buttons
+- Show the choice they made (with icon/label from config)
+- Show the URL they need to share
+- Provide helpful message explaining they can reload to get URL again
+- This handles the "positive intent" scenario where player just wants to verify or re-send URL
 
 **VALIDATE**:
 ```bash
@@ -798,7 +920,9 @@ npm run lint
 3. Update `makeChoice` to validate and lock
 4. Update `startNewGame` to clear locks
 5. Update `makeNextChoiceAfterResults` to validate and lock
-6. Add UI indicator for locked choices
+6. Add UI logic for locked choice display (conditional rendering)
+
+**IMPORTANT**: The locked choice display UI (Change 6 from Task 2.1) is REQUIRED, not optional. This is what implements the "positive intent" behavior where players who reload a URL see their locked choice instead of being allowed to choose again.
 
 **VALIDATE**:
 ```bash
@@ -834,9 +958,44 @@ THEN:
   - localStorage contains lock for gameId=abc123, round=1, player=1, choice=rock
 ```
 
-**Test Case 2: Choice Lock Allows Idempotent Retry**
+**Test Case 2: URL Re-Load Shows Previous Choice (Positive Intent)**
+```
+GIVEN: Player 1 has made choice "rock" and sent URL to Player 2
+AND: Player 2 has made choice "paper" and sent new URL back
+WHEN:
+  1. Player 1 clicks Player 2's URL (wanting to verify or re-send)
+  2. App loads Player 2's URL (shows Player 2 chose "paper")
+  3. App checks localStorage: "Player 1 already chose for this round"
+THEN:
+  - ✅ UI shows: "Your choice: rock" (locked choice display)
+  - ✅ UI shows: URL to share (the one Player 1 originally sent)
+  - ❌ UI does NOT show: Choice buttons
+  - ✅ Player can copy their original URL to re-send if needed
+  - 💡 Assumes: Player just wanted to verify choice or get URL again
+```
+
+**Test Case 3: Back Button Cannot Bypass Lock**
+```
+GIVEN: Player 1 has made choice "rock" for round 1
+AND: URL has updated to include "rock" choice
+AND: localStorage has lock: {gameId: "abc", round: 1, player: 1, choice: "rock"}
+WHEN:
+  1. Player 1 hits browser BACK button
+  2. Browser URL changes to previous state (before choice)
+  3. useEffect triggers due to hash change
+  4. App re-renders with previous URL state
+THEN:
+  - ✅ App checks localStorage for lock
+  - ✅ Finds lock for round 1, player 1, choice "rock"
+  - ✅ UI shows locked choice display (NOT choice buttons)
+  - ❌ Player CANNOT make different choice
+  - 💡 localStorage persistence defeats back button time travel
+```
+
+**Test Case 4: Choice Lock Allows Idempotent Retry (If Buttons Visible)**
 ```
 GIVEN: Player 1 has already locked choice "rock"
+AND: UI still shows choice buttons (edge case)
 WHEN:
   1. Player 1 clicks "rock" again (same choice)
 THEN:
@@ -845,7 +1004,7 @@ THEN:
   - localStorage lock unchanged
 ```
 
-**Test Case 3: Choice Lock Clears on New Game**
+**Test Case 5: Choice Lock Clears on New Game**
 ```
 GIVEN: Player has locks from previous game
 WHEN:
@@ -857,7 +1016,7 @@ THEN:
   - No errors
 ```
 
-**Test Case 4: Cross-Tab Synchronization**
+**Test Case 6: Cross-Tab Synchronization**
 ```
 GIVEN: Player has game open in Tab A and Tab B
 WHEN:
@@ -1045,6 +1204,13 @@ const url = `#${encrypted}.${hmac}`;
 
 **Effort Estimate**: 2-3 days (most code already exists, just needs integration)
 
+**Architectural Benefit**: Full PRD implementation would make "positive intent UX" **automatic**:
+- App always checks localStorage first for gameId
+- If player already made choice, it's in localStorage
+- URL only provides opponent's delta
+- UI naturally renders locked choice (no need for explicit choice-lock UI logic)
+- Current choice-locking is a "bridge solution" until full PRD migration
+
 ### Long-Term (Production Hardening)
 
 1. **Server-side validation** - Add optional server to verify game moves
@@ -1220,10 +1386,22 @@ npm run dev
 # 4. Start new game
 # 5. Make choice "rock"
 # 6. Verify lock appears: choice-lock-{gameId}-r1-p1
-# 7. Refresh page
-# 8. Try to choose "paper"
-# 9. Verify error: "You already chose 'rock'"
-# 10. Check console for warnings
+# 7. Verify UI shows locked choice display (NOT choice buttons)
+# 8. Note current URL in address bar
+
+# Back Button Test:
+# 9. Hit browser BACK button
+# 10. Verify URL changes to previous state
+# 11. Verify UI STILL shows locked choice display
+# 12. Verify choice buttons are NOT visible
+# 13. Verify localStorage lock still exists
+
+# Refresh Test:
+# 14. Refresh page
+# 15. Verify locked choice display persists
+# 16. Try to choose "paper" (if buttons somehow visible)
+# 17. Verify error: "You already chose 'rock'"
+# 18. Check console for warnings
 ```
 
 **Expected**:
@@ -1260,17 +1438,18 @@ npm run dev
 
 ## Success Criteria
 
-- [x] Choice locking implemented and working
-- [x] Both games updated (dilemma, rock-paper-scissors)
-- [x] Framework utilities created (choiceLockManager, useChoiceLock)
-- [x] Error messages are user-friendly
-- [x] localStorage gracefully degrades if unavailable
-- [x] Cross-tab synchronization works
-- [x] Audit report documents current state vs PRD
-- [x] Documentation updated with choice-locking pattern
-- [x] All type checks pass
-- [x] All builds succeed
-- [x] Manual tests pass
+- [ ] Choice locking implemented and working
+- [ ] Both games updated (dilemma, rock-paper-scissors)
+- [ ] Framework utilities created (choiceLockManager, useChoiceLock)
+- [ ] Error messages are user-friendly
+- [ ] localStorage gracefully degrades if unavailable
+- [ ] Cross-tab synchronization works
+- [ ] **Positive intent UX implemented**: Locked choice display instead of choice buttons on URL reload
+- [ ] Audit report documents current state vs PRD
+- [ ] Documentation updated with choice-locking pattern
+- [ ] All type checks pass
+- [ ] All builds succeed
+- [ ] Manual tests pass (including Test Case 2: URL re-load behavior)
 
 ---
 
@@ -1311,10 +1490,22 @@ npm run build
 3. Server-side move validation
 4. Implement full checksum verification for localStorage
 
+**Architectural Insight** (User's Observation):
+The user noted: "I wonder if this is how it will behave anyway if we integrate all the other aspects of the framework that we designed but didn't use."
+
+**Answer**: YES! The full PRD-compliant localStorage-first architecture would provide this behavior automatically:
+- localStorage would be source of truth for player's own choices
+- URLs would only contain opponent's latest move (delta)
+- App would load localStorage → see player already chose → show locked choice
+- No need for explicit choice-lock UI conditional logic
+
+**Current approach**: Explicit choice-locking is necessary because current implementation stores NO state in localStorage (all state in URL). This is a "bridge solution" that adds the desired behavior without full architecture refactor.
+
 **Trade-offs Made**:
 - ✅ Simplicity over perfect security (acceptable for trust-based games)
 - ✅ Client-side only (no server required)
 - ✅ Quick implementation (reuses existing patterns)
+- ✅ Bridge solution until full PRD migration
 - ❌ Not foolproof (determined attacker can bypass)
 
 ---
