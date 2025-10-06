@@ -14,14 +14,20 @@ Implement Tic-Tac-Toe as a correspondence game using the existing YAML configura
 - **Board state visualization** instead of hidden choices
 - **Win detection** mid-game instead of only at end
 - **9 position choices** instead of 2-3 fixed options
+- **Delta-based URLs** with checksum verification for 70-80% smaller URLs and state integrity
 
 ### Success Metrics
 
-- **Framework Compatibility**: Tic-Tac-Toe config loads without framework modifications
+- **Framework Evolution**: Breaking changes are acceptable - must update and verify existing games work:
+  - `correspondence-games-framework/games/dilemma/` (Prisoner's Dilemma)
+  - `correspondence-games-framework/games/rock-paper-scissors/`
 - **Game Completeness**: Players can complete full games with proper win/draw detection
 - **Anti-Cheat**: Choice locking prevents players from changing moves after seeing opponent's response
+- **State Integrity**: Checksum verification ensures both players have identical board state between moves
+- **URL Efficiency**: Delta-based URLs are 70-80% smaller than full state encoding
 - **UX Quality**: Board visualization is intuitive, game flow is clear
 - **Performance**: Game loads and transitions within 500ms
+- **Regression Testing**: All existing games (Prisoner's Dilemma, RPS) continue to work after framework changes
 
 ---
 
@@ -130,21 +136,6 @@ This makes it an excellent test case for sequential turn-based correspondence ga
 
 **Edge Cases:**
 - Last move is winning move → Win takes precedence over draw
-
-### Story 6: Start New Game After Completion
-
-**As a player**, I want to start a fresh game after one ends so that we can play again.
-
-**Acceptance Criteria:**
-- [ ] "Start New Game" button clears board
-- [ ] New game ID generated
-- [ ] Choice locks cleared for old game
-- [ ] Player 1 assigned to game starter
-- [ ] URL hash cleared
-
-**Edge Cases:**
-- Player refreshes on completed game → Sees final state, not new game
-- Player manually clears localStorage → New game starts automatically
 
 ---
 
@@ -380,6 +371,7 @@ stateSchema:
   status: "in-progress | won | draw"
   createdAt: "ISO8601"
   lastMove: "ISO8601"
+  checksum: "string"  # SHA-256 hash for state integrity verification
 ```
 
 ---
@@ -465,41 +457,56 @@ sequenceDiagram
 
     Note over P1,URL: Player 1 First Move
     P1->>App1: Clicks position 4 (center)
+    App1->>LS1: Verify current checksum
     App1->>LS1: Lock choice (pos-4)
     App1->>LS1: Update board [null, null, null, null, 'X', ...]
-    App1->>URL: Generate URL (board state + HMAC)
+    App1->>App1: Calculate new checksum
+    App1->>LS1: Store state with checksum
+    App1->>URL: Generate URL (delta: move + prev/new checksums + HMAC)
     App1-->>P1: Show URL copy button
 
     P1->>P2: Shares URL
 
     Note over P2,LS2: Player 2 Receives Turn
     P2->>App2: Opens URL
-    App2->>URL: Parse hash
+    App2->>URL: Parse delta from hash
     App2->>App2: Validate HMAC
-    App2->>LS2: Load/merge state
+    App2->>LS2: Load current state
+    App2->>App2: Verify prevChecksum matches current state
+    App2->>LS2: Apply move to board
+    App2->>App2: Verify newChecksum matches result
+    App2->>LS2: Store updated state with checksum
     App2-->>P2: Show board with X in center
     App2-->>P2: "Your turn (O)"
 
     Note over P2,URL: Player 2 Response
     P2->>App2: Clicks position 0 (top-left)
+    App2->>LS2: Verify current checksum
     App2->>LS2: Lock choice (pos-0)
     App2->>LS2: Update board ['O', null, null, null, 'X', ...]
+    App2->>App2: Calculate new checksum
     App2->>App2: Check win conditions
     App2->>App2: No winner yet
-    App2->>URL: Generate URL (updated board + HMAC)
+    App2->>URL: Generate URL (delta: move + prev/new checksums + HMAC)
     App2-->>P2: Show URL copy button
 
     P2->>P1: Shares URL
 
     Note over P1,LS1: Player 1 Next Move
     P1->>App1: Opens new URL
-    App1->>URL: Parse hash
+    App1->>URL: Parse delta from hash
     App1->>App1: Validate HMAC
-    App1->>LS1: Update state
+    App1->>LS1: Load current state
+    App1->>App1: Verify prevChecksum matches current state
+    App1->>LS1: Apply move to board
+    App1->>App1: Verify newChecksum matches result
+    App1->>LS1: Store updated state with checksum
     App1-->>P1: Show board with O and X
     P1->>App1: Clicks position 8 (bottom-right)
+    App1->>LS1: Verify current checksum
     App1->>LS1: Lock choice (pos-8)
     App1->>LS1: Update board ['O', null, null, null, 'X', null, null, null, 'X']
+    App1->>App1: Calculate new checksum
 
     Note over P1,App1: Continue until...
 
@@ -541,6 +548,7 @@ interface TicTacToeState {
   status: 'in-progress' | 'won' | 'draw';
   createdAt: string;  // ISO8601
   lastMove: string;  // ISO8601
+  checksum: string;  // SHA-256 hash of board state for verification
 }
 
 interface Move {
@@ -631,6 +639,473 @@ function getPlayerFromURL(urlState: URLState | null): 1 | 2 {
 }
 ```
 
+### Browser Storage + Checksum Verification Strategy
+
+**Core Principle**: localStorage holds the authoritative game state, URLs only carry deltas (individual moves) with checksum verification to ensure state consistency.
+
+#### State Storage Architecture
+
+```typescript
+interface StoredGameState {
+  gameId: string;
+  board: (string | null)[];
+  moves: Move[];
+  currentTurn: number;
+  currentPlayer: 1 | 2;
+  winner: 1 | 2 | null;
+  winningPattern: string[] | null;
+  status: 'in-progress' | 'won' | 'draw';
+  createdAt: string;
+  lastMove: string;
+  checksum: string;  // SHA-256 hash of canonical board state
+}
+
+interface URLDelta {
+  gameId: string;              // Link this move to a game
+  move: {
+    player: 1 | 2;
+    position: string;          // e.g., 'pos-4'
+    turn: number;
+  };
+  prevChecksum: string;        // Expected checksum BEFORE this move
+  newChecksum: string;         // Expected checksum AFTER this move
+  hmac: string;                // HMAC of entire delta for tamper detection
+}
+```
+
+#### Checksum Calculation
+
+```typescript
+import { checksumManager } from '@/framework/storage/checksumManager';
+
+/**
+ * Generate canonical checksum of board state
+ * CRITICAL: Must be deterministic - same board always produces same checksum
+ */
+function calculateBoardChecksum(board: (string | null)[]): string {
+  // Create canonical representation
+  const canonical = JSON.stringify({
+    board: board,  // ['X', null, 'O', ...]
+    // Only include data that affects game validity
+    // DO NOT include timestamps, UI state, or player names
+  });
+
+  return checksumManager.generate(canonical);
+}
+
+/**
+ * Verify board state hasn't been tampered with
+ */
+function verifyBoardChecksum(
+  board: (string | null)[],
+  expectedChecksum: string
+): boolean {
+  const actualChecksum = calculateBoardChecksum(board);
+  return actualChecksum === expectedChecksum;
+}
+```
+
+#### Move Flow with Checksum Verification
+
+```typescript
+// Player 1 makes a move
+async function makeMove(position: string): Promise<void> {
+  // 1. Load current state from localStorage
+  const currentState = loadGameState(gameId);
+
+  // 2. Verify current state checksum (detect local tampering)
+  if (!verifyBoardChecksum(currentState.board, currentState.checksum)) {
+    throw new Error('Local game state corrupted - checksum mismatch');
+  }
+
+  const prevChecksum = currentState.checksum;
+
+  // 3. Validate move
+  const validation = validateMove(position, currentState.board, currentPlayer);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  // 4. Lock choice (anti-cheat)
+  choiceLockManager.lock(gameId, currentTurn, currentPlayer, position);
+
+  // 5. Apply move to board
+  const newBoard = [...currentState.board];
+  const index = parseInt(position.split('-')[1]);
+  newBoard[index] = currentPlayer === 1 ? 'X' : 'O';
+
+  // 6. Calculate NEW checksum
+  const newChecksum = calculateBoardChecksum(newBoard);
+
+  // 7. Update localStorage with new state
+  const newState: StoredGameState = {
+    ...currentState,
+    board: newBoard,
+    moves: [...currentState.moves, { player: currentPlayer, position, turn: currentTurn }],
+    currentTurn: currentTurn + 1,
+    currentPlayer: getNextPlayer(currentPlayer),
+    checksum: newChecksum,
+    lastMove: new Date().toISOString()
+  };
+
+  saveGameState(gameId, newState);
+
+  // 8. Generate URL with DELTA only (not full state)
+  const urlDelta: URLDelta = {
+    gameId,
+    move: {
+      player: currentPlayer,
+      position,
+      turn: currentTurn
+    },
+    prevChecksum,  // What board state should be BEFORE this move
+    newChecksum,   // What board state should be AFTER this move
+    hmac: ''       // Calculated below
+  };
+
+  // 9. Add HMAC for tamper detection
+  urlDelta.hmac = hmacManager.generate(JSON.stringify({
+    gameId: urlDelta.gameId,
+    move: urlDelta.move,
+    prevChecksum: urlDelta.prevChecksum,
+    newChecksum: urlDelta.newChecksum
+  }));
+
+  // 10. Encode delta to URL
+  const compressedDelta = LZString.compressToEncodedURIComponent(
+    JSON.stringify(urlDelta)
+  );
+
+  window.location.hash = compressedDelta;
+}
+```
+
+#### Receiving Opponent's Move
+
+```typescript
+// Player 2 opens URL with delta
+async function loadURLDelta(): Promise<void> {
+  // 1. Parse URL hash
+  const hash = window.location.hash.slice(1);
+  const decompressed = LZString.decompressFromEncodedURIComponent(hash);
+  const delta: URLDelta = JSON.parse(decompressed);
+
+  // 2. Verify HMAC (tamper detection)
+  const expectedHmac = hmacManager.generate(JSON.stringify({
+    gameId: delta.gameId,
+    move: delta.move,
+    prevChecksum: delta.prevChecksum,
+    newChecksum: delta.newChecksum
+  }));
+
+  if (delta.hmac !== expectedHmac) {
+    throw new Error('URL has been tampered with - HMAC mismatch');
+  }
+
+  // 3. Load current state from localStorage (if exists)
+  let currentState = loadGameState(delta.gameId);
+
+  if (!currentState) {
+    // New game - initialize from URL
+    currentState = initializeGameFromDelta(delta);
+  }
+
+  // 4. CRITICAL: Verify prevChecksum matches current state
+  if (!verifyBoardChecksum(currentState.board, delta.prevChecksum)) {
+    throw new Error(
+      `Board state mismatch!\n` +
+      `Expected checksum: ${delta.prevChecksum}\n` +
+      `Actual checksum: ${calculateBoardChecksum(currentState.board)}\n\n` +
+      `This means your local game state is out of sync with your opponent's move.\n` +
+      `Possible causes:\n` +
+      `- You're viewing an old URL (opponent made moves you haven't seen)\n` +
+      `- localStorage was cleared mid-game\n` +
+      `- Local tampering detected`
+    );
+  }
+
+  // 5. Apply opponent's move
+  const newBoard = [...currentState.board];
+  const index = parseInt(delta.move.position.split('-')[1]);
+  newBoard[index] = delta.move.player === 1 ? 'X' : 'O';
+
+  // 6. Verify newChecksum matches after applying move
+  if (!verifyBoardChecksum(newBoard, delta.newChecksum)) {
+    throw new Error(
+      'Move application failed - resulting board checksum mismatch'
+    );
+  }
+
+  // 7. Update localStorage
+  const newState: StoredGameState = {
+    ...currentState,
+    board: newBoard,
+    moves: [...currentState.moves, delta.move],
+    currentTurn: delta.move.turn + 1,
+    currentPlayer: getNextPlayer(delta.move.player),
+    checksum: delta.newChecksum,
+    lastMove: new Date().toISOString()
+  };
+
+  saveGameState(delta.gameId, newState);
+
+  // 8. Render updated board - it's now your turn
+  renderGameState(newState);
+}
+```
+
+#### Edge Case: Out-of-Sync States
+
+**Scenario**: Player 2 makes move, but Player 1 opens an OLD URL (from 2 moves ago)
+
+```typescript
+function handleChecksumMismatch(
+  delta: URLDelta,
+  currentState: StoredGameState
+): void {
+  const currentChecksum = calculateBoardChecksum(currentState.board);
+
+  // Check if current state is AHEAD of delta
+  if (currentState.currentTurn > delta.move.turn) {
+    // Player is viewing an old URL
+    showWarning({
+      title: 'Old Game Link',
+      message: `This link is from turn ${delta.move.turn}, but you're already on turn ${currentState.currentTurn}. Please use the latest link from your opponent.`,
+      actions: ['View Current Game', 'Ignore']
+    });
+    return;
+  }
+
+  // Check if we need to rebuild from scratch
+  if (currentState.currentTurn < delta.move.turn - 1) {
+    // We're missing intermediate moves - cannot safely apply delta
+    showError({
+      title: 'Missing Game History',
+      message: `Cannot apply this move - you're missing ${delta.move.turn - currentState.currentTurn - 1} previous moves. Ask your opponent to share the latest link.`,
+      actions: ['Start New Game']
+    });
+    return;
+  }
+
+  // Otherwise, genuine tampering or corruption
+  showError({
+    title: 'Game State Corrupted',
+    message: 'Local game state does not match the expected state for this move. This could indicate tampering or data corruption.',
+    actions: ['Clear Local State', 'Cancel']
+  });
+}
+```
+
+#### Benefits of This Approach
+
+1. **Minimal URL Size**: URLs only contain single move delta (~100 bytes compressed) instead of full board state
+   - Example: `#N4IgdghgtgpiBcIDaBDAzmAwgNgFwE8AKABzAHd4BnAAgBM8AbAeyIBoQA7AEwDsBfIA==`
+
+2. **Checksum Verification**: Both players verify board state consistency before/after each move
+   - Detects local tampering
+   - Detects out-of-sync states
+   - Ensures both players see identical board
+
+3. **localStorage Authority**: localStorage is source of truth, URLs are just transport
+   - Survives page refreshes
+   - Works offline (until sharing URL)
+   - No backend needed
+
+4. **Tamper Detection Layers**:
+   - **HMAC**: Prevents URL modification
+   - **Checksum (prev)**: Ensures starting state matches
+   - **Checksum (new)**: Ensures move was applied correctly
+   - **Choice Lock**: Prevents player from changing own move
+
+5. **Error Recovery**: Clear error messages help players understand sync issues
+   - "You're viewing an old link"
+   - "Missing game history"
+   - "Board state corrupted"
+
+#### URL Format Comparison
+
+**Old Approach (Full State)**:
+```
+#eyJnYW1lSWQiOiJhYmMxMjMiLCJib2FyZCI6WyJYIixudWxsLCJPIixudWxsLCJYIixudWxsLG51bGwsbnVsbCxudWxsXSwiY3VycmVudFR1cm4iOjMsImN1cnJlbnRQbGF5ZXIiOjIsIm1vdmVzIjpbeyJwbGF5ZXIiOjEsInBvc2l0aW9uIjoicG9zLTQiLCJ0dXJuIjoxfSx7InBsYXllciI6Miwicm9zaXRpb24iOiJwb3MtMiIsInR1cm4iOjJ9LHsicGxheWVyIjoxLCJwb3NpdGlvbiI6InBvcy0wIiwidHVybiI6M31dLCJ3aW5uZXIiOm51bGwsInN0YXR1cyI6ImluLXByb2dyZXNzIn0=
+(~350+ characters)
+```
+
+**New Approach (Delta Only)**:
+```
+#N4IgdghgtgpiBcIDaBDAzmAwgNgFwE8AKABQCMAXVAFQBNUA7AEwBsBfIA
+(~60-100 characters)
+```
+
+**Size Reduction**: ~70-80% smaller URLs
+
+#### Integration with Existing Framework
+
+The checksum + delta approach integrates seamlessly with existing anti-cheat mechanisms:
+
+```typescript
+// Layer 1: HMAC (URL tamper detection)
+const hmac = hmacManager.generate(deltaPayload);
+if (receivedHmac !== hmac) throw new Error('URL tampered');
+
+// Layer 2: Checksum (state consistency verification)
+const prevChecksum = calculateBoardChecksum(currentBoard);
+if (delta.prevChecksum !== prevChecksum) throw new Error('State mismatch');
+
+// Layer 3: Choice Lock (prevent move changes)
+choiceLockManager.lock(gameId, turn, player, position);
+
+// Layer 4: Checksum (result verification)
+const newChecksum = calculateBoardChecksum(newBoard);
+if (delta.newChecksum !== newChecksum) throw new Error('Move application failed');
+```
+
+**Result**: Four independent verification layers ensure game integrity without backend.
+
+---
+
+## Breaking Changes & Migration Strategy
+
+### Philosophy: Evolution Over Preservation
+
+**Breaking changes are acceptable and encouraged** when they improve the framework architecture. The delta-based URL + checksum verification approach benefits all games, not just Tic-Tac-Toe.
+
+### Affected Components
+
+1. **`useURLState` hook** - Changes from full state to delta encoding
+2. **`useGameState` hook** - Adds checksum field to state
+3. **URL format** - New delta structure (not backward compatible)
+4. **localStorage schema** - Adds checksum to stored state
+
+### Migration Checklist
+
+#### Phase A: Framework Changes (Breaking)
+- [ ] Implement delta-based URL encoding in `useURLState`
+- [ ] Add checksum field to game state types
+- [ ] Create `checksumDelta.ts` utility module
+- [ ] Update `urlGeneration.ts` to use delta format
+- [ ] Update HMAC to work with delta payloads
+
+#### Phase B: Update Existing Games
+- [ ] **Prisoner's Dilemma** (`correspondence-games-framework/games/dilemma/`)
+  - [ ] Update to use delta URLs (single choice per round)
+  - [ ] Add checksum to round state
+  - [ ] Update choice lock keys to include checksum
+  - [ ] Test full game flow (5 rounds)
+  - [ ] Verify rematch functionality works
+  - [ ] Test game history integration
+
+- [ ] **Rock-Paper-Scissors** (`correspondence-games-framework/games/rock-paper-scissors/`)
+  - [ ] Update to use delta URLs (single choice per round)
+  - [ ] Add checksum to round state
+  - [ ] Test full game flow
+  - [ ] Verify all RPS-specific features
+
+#### Phase C: Validation
+- [ ] Run full test suite: `npm run validate`
+- [ ] Manual testing protocol:
+  ```bash
+  # Test each game end-to-end
+  npm run dev
+
+  # 1. Prisoner's Dilemma
+  - Start new game
+  - Make choice → copy URL
+  - Open in incognito → opponent view
+  - Complete all 5 rounds
+  - Verify rematch works
+
+  # 2. Rock-Paper-Scissors
+  - Start new game
+  - Make choice → copy URL
+  - Open in incognito → opponent view
+  - Complete game
+
+  # 3. Tic-Tac-Toe (new)
+  - Start new game
+  - Play full game to win/draw
+  - Verify checksum errors work
+  ```
+
+#### Phase D: Migration Path for Old URLs
+
+**Problem**: Existing shared URLs use old format and will break
+
+**Solution**: Graceful degradation with migration message
+
+```typescript
+function parseURL(hash: string): GameState | URLDelta | null {
+  try {
+    const decompressed = LZString.decompressFromEncodedURIComponent(hash);
+    const parsed = JSON.parse(decompressed);
+
+    // Detect old format (has 'rounds' or 'board' at top level)
+    if ('rounds' in parsed || 'board' in parsed) {
+      showMigrationMessage({
+        title: 'Outdated Game Link',
+        message: `This link uses an older format and is no longer compatible.
+                  Please start a new game - we've improved the system with:
+                  • Smaller, faster URLs
+                  • Better security with checksums
+                  • Improved state verification`,
+        action: 'Start New Game'
+      });
+      return null;
+    }
+
+    // New delta format
+    if ('move' in parsed && 'prevChecksum' in parsed) {
+      return parsed as URLDelta;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Failed to parse URL:', error);
+    return null;
+  }
+}
+```
+
+### Testing Protocol
+
+```bash
+# 1. Unit tests (all must pass)
+npm run test
+
+# 2. Type checking (strict mode)
+npm run type-check
+
+# 3. Linting (zero warnings)
+npm run lint
+
+# 4. Build verification
+npm run build
+
+# 5. E2E tests (if available)
+npm run test:e2e
+
+# 6. Manual regression testing (see Phase C above)
+```
+
+### Rollback Plan
+
+If critical issues found after merge:
+
+1. **Immediate**: Revert commit with breaking changes
+2. **Document**: Log issue in GitHub Issues
+3. **Fix Forward**: Create hotfix branch
+4. **Re-test**: Full validation protocol
+5. **Re-merge**: Only when all games verified
+
+### Success Criteria for Migration
+
+- ✅ All 3 games (Prisoner's Dilemma, RPS, Tic-Tac-Toe) work end-to-end
+- ✅ `npm run validate` passes with zero errors
+- ✅ No TypeScript errors in strict mode
+- ✅ Old URLs show helpful migration message (not crash)
+- ✅ URL sizes reduced by 70-80% for all games
+- ✅ Checksum verification working for all games
+- ✅ Documentation updated with new architecture
+
 ---
 
 ## Implementation Phases
@@ -647,39 +1122,91 @@ function getPlayerFromURL(urlState: URLState | null): 1 | 2 {
 
 ---
 
-### Phase 2: Game Logic Core
+### Phase 2: Framework Changes (Breaking) + Delta/Checksum Core
 
 **Files to Create**:
 
-1. **`games/configs/tic-tac-toe.yaml`** (300 lines)
-   - Full game configuration as designed above
-   - 9 position choices with row/col metadata
-   - 8 win condition patterns
-   - Sequential progression settings
+1. **`src/framework/utils/checksumDelta.ts`** (150 lines) - **CRITICAL FIRST**
+   - `calculateBoardChecksum(board)` - SHA-256 checksum generation
+   - `verifyBoardChecksum(board, expectedChecksum)` - Validation
+   - `createURLDelta(gameState, move)` - Build delta with checksums
+   - `applyURLDelta(currentState, delta)` - Apply with verification
+   - `handleChecksumMismatch(delta, currentState)` - Error recovery
+   - Unit tests for all functions
 
-2. **`src/game-logic/winDetector.ts`** (150 lines)
+2. **`src/framework/hooks/useURLState.ts`** (modifications) - **BREAKING**
+   - Change from full state encoding to delta encoding
+   - Parse `URLDelta` format instead of `GameState`
+   - Add checksum verification on URL load
+   - Detect old URL format and show migration message
+   - Handle checksum mismatch errors with clear messages
+
+3. **`src/framework/hooks/useGameState.ts`** (modifications) - **BREAKING**
+   - Add `checksum` field to state type
+   - Calculate checksum on every state update
+   - Verify checksum before applying moves
+
+**Files to Update (Existing Games)**:
+
+4. **Prisoner's Dilemma Migration**
+   - Update `src/features/game/utils/urlGeneration.ts` to use deltas
+   - Add checksum to `GameState` schema
+   - Update round completion to calculate checksums
+   - Test full 5-round flow
+
+5. **Rock-Paper-Scissors Migration** (if exists)
+   - Same delta-based URL updates
+   - Add checksum verification
+   - Test full game flow
+
+**Tic-Tac-Toe Logic Files**:
+
+6. **`src/game-logic/winDetector.ts`** (150 lines)
    - `checkWinCondition(board, player, config)`
    - `checkDrawCondition(board)`
    - `getWinningPattern(board, player, config)`
    - Unit tests for all 8 win patterns
 
-3. **`src/game-logic/turnManager.ts`** (100 lines)
+7. **`src/game-logic/turnManager.ts`** (100 lines)
    - `getNextPlayer(currentPlayer)`
    - `getPlayerFromURL(urlState)`
    - `isValidTurn(gameState, player)`
    - Turn sequence validation
 
-4. **`src/game-logic/boardValidator.ts`** (80 lines)
+8. **`src/game-logic/boardValidator.ts`** (80 lines)
    - `validateMove(position, board, player)`
    - `getAvailablePositions(board)`
    - `isBoardFull(board)`
 
+9. **`games/configs/tic-tac-toe.yaml`** (300 lines)
+   - Full game configuration as designed above
+   - 9 position choices with row/col metadata
+   - 8 win condition patterns
+   - Sequential progression settings
+
 **Success Criteria**:
 ```bash
+# 1. Framework tests pass
+npm run test -- framework/utils/checksumDelta.test.ts
+npm run test -- framework/hooks/useURLState.test.ts
+
+# 2. Existing games still work
+npm run test -- features/game/
+
+# 3. New game logic tests pass
 npm run test -- game-logic/
 # All tests pass
 # Win detection covers all 8 patterns
 # Draw detection verified
+
+# 4. Type checking passes
+npm run type-check
+
+# 5. Manual verification of ALL games
+npm run dev
+# Test Prisoner's Dilemma full flow
+# Test Rock-Paper-Scissors (if exists)
+# Test Tic-Tac-Toe basic flow
 ```
 
 ---
@@ -727,18 +1254,41 @@ npm run dev
    - Add `currentPlayer` tracking (different from simultaneous rounds)
    - Add `moves` array for history
    - Add `winningPattern` field
+   - Add `checksum` field for state verification
 
-2. **`src/App.tsx`** (new game implementation)
+2. **`src/framework/hooks/useURLState.ts`** (modifications)
+   - Change from full state encoding to delta encoding
+   - Parse URLDelta format instead of full GameState
+   - Add checksum verification on URL load
+   - Handle checksum mismatch errors with clear messages
+
+3. **`src/framework/utils/checksumDelta.ts`** (new file ~150 lines)
+   - `calculateBoardChecksum(board)` - Generate SHA-256 checksum
+   - `verifyBoardChecksum(board, expectedChecksum)` - Validate checksum
+   - `createURLDelta(gameState, move)` - Build delta object with checksums
+   - `applyURLDelta(currentState, delta)` - Apply delta with verification
+   - `handleChecksumMismatch(delta, currentState)` - Error recovery logic
+
+4. **`src/App.tsx`** (new game implementation)
    - Load `tic-tac-toe.yaml` config
-   - Initialize board state (9 nulls)
+   - Initialize board state (9 nulls) with initial checksum
    - Integrate `useChoiceLock` for positions
-   - Handle cell clicks → validate → update board → check win → generate URL
+   - Handle cell clicks → validate → update board → calculate checksums → generate delta URL
+   - On URL load: verify checksums → apply delta → update localStorage
    - Conditional rendering: board → status → new game
 
 **Key Logic**:
 ```typescript
 const makeMove = useCallback((position: string) => {
   if (!gameState || !config) return;
+
+  // Verify current state checksum (detect local tampering)
+  if (!verifyBoardChecksum(gameState.board, gameState.checksum)) {
+    alert('Local game state corrupted - checksum mismatch');
+    return;
+  }
+
+  const prevChecksum = gameState.checksum;
 
   // Validate move
   const validation = validateMove(position, gameState.board, currentPlayer);
@@ -760,6 +1310,9 @@ const makeMove = useCallback((position: string) => {
   const index = parseInt(position.split('-')[1]);
   newBoard[index] = config.players[currentPlayer - 1].symbol;
 
+  // Calculate NEW checksum
+  const newChecksum = calculateBoardChecksum(newBoard);
+
   // Check win
   const winResult = checkWinCondition(newBoard, currentPlayer, config);
 
@@ -776,15 +1329,22 @@ const makeMove = useCallback((position: string) => {
     winner: winResult.won ? currentPlayer : null,
     winningPattern: winResult.pattern,
     status: winResult.won ? 'won' : isDraw ? 'draw' : 'in-progress',
-    lastMove: new Date().toISOString()
+    lastMove: new Date().toISOString(),
+    checksum: newChecksum  // NEW: Store checksum with state
   };
 
   setGameState(newState);
 
-  // Generate URL if game continues
+  // Generate URL delta (not full state)
   if (newState.status === 'in-progress') {
-    const url = generateGameURL(newState);
-    setUrlState(url);
+    const delta = createURLDelta({
+      gameId: gameState.gameId,
+      move: { player: currentPlayer, position, turn: gameState.currentTurn },
+      prevChecksum,
+      newChecksum
+    });
+
+    setUrlState(delta);
   }
 }, [gameState, config, currentPlayer, validateAndLock]);
 ```
@@ -895,10 +1455,11 @@ npm run build
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Framework doesn't support sequential turns | Medium | High | Add `progression.type: 'sequential'` to config schema, modify `useGameState` to handle alternating players instead of simultaneous rounds |
-| Board state too large for URL | Low | Medium | Use delta encoding (only send changed positions), compress JSON before base64 |
-| Choice locking conflicts with multi-turn state | Medium | Medium | Lock at turn-level not round-level: `choice-lock-{gameId}-t{turn}-p{player}` |
+| Framework doesn't support sequential turns | Medium | High | Add `progression.type: 'sequential'` to config schema, modify `useGameState` to handle alternating players instead of simultaneous rounds. **Breaking changes OK** - update Prisoner's Dilemma and RPS to use new architecture |
+| Board state too large for URL | Low | Medium | Use delta encoding (only send changed positions), compress JSON before base64. Checksum verification ensures integrity |
+| Choice locking conflicts with multi-turn state | Medium | Medium | Lock at turn-level not round-level: `choice-lock-{gameId}-t{turn}-p{player}`. May require updates to existing games |
 | Win detection performance | Low | Low | 8 patterns check is O(1), runs only after moves (max 9 times) |
+| Breaking changes break existing games | Medium | High | **Mitigation Plan**: <br/>1. Create feature branch<br/>2. Implement changes<br/>3. Update Prisoner's Dilemma to new API<br/>4. Update Rock-Paper-Scissors to new API<br/>5. Run full test suite on all games<br/>6. Manual testing of all game flows<br/>7. Only merge when all games verified |
 
 ### UX Risks
 
@@ -915,7 +1476,8 @@ npm run build
 |------|-----------|--------|------------|
 | Tic-Tac-Toe too simple to validate framework | Low | Medium | Focus on framework extensibility proof, not game complexity |
 | Players abandon before completion | Medium | Low | Add game ID to localStorage, allow resuming interrupted games |
-| Framework requires significant changes | Medium | High | Start with config-only approach, only modify framework if absolutely necessary |
+| Framework requires significant changes | Medium | High | **Breaking changes are acceptable** - this is the right time to improve architecture. Delta-based URLs benefit all games. Update existing games as part of implementation |
+| Regression in existing games | Medium | High | Comprehensive testing protocol: update games → test suite → manual verification before merge |
 
 ---
 
@@ -1026,7 +1588,6 @@ if (checkDrawCondition(newBoard)) {
 
 ### Functional Requirements
 
-- [ ] Player can start new Tic-Tac-Toe game
 - [ ] Player 1 (X) can make first move
 - [ ] Move is locked in localStorage (anti-cheat)
 - [ ] URL is generated with board state and HMAC
@@ -1034,7 +1595,7 @@ if (checkDrawCondition(newBoard)) {
 - [ ] Players alternate turns (X → O → X → O...)
 - [ ] Win detection works for all 8 patterns (3 rows, 3 cols, 2 diagonals)
 - [ ] Draw detection works when board full with no winner
-- [ ] Winning player sees victory message
+- [ ] Winning player sees victory message and share url button
 - [ ] Losing player sees defeat message (when opening final URL)
 - [ ] Both players can start new game after completion
 - [ ] Choice locking prevents changing moves after submission
@@ -1055,8 +1616,13 @@ if (checkDrawCondition(newBoard)) {
 - [ ] Tic-Tac-Toe loads from YAML config (no hardcoding)
 - [ ] `progression.type: 'sequential'` is respected
 - [ ] Existing hooks (`useGameState`, `useChoiceLock`, `useURLState`) work with modifications
-- [ ] No breaking changes to RPS or Prisoner's Dilemma
+- [ ] **Breaking changes are OK**: Update existing games to new architecture
+  - [ ] Prisoner's Dilemma updated to delta-based URLs with checksums
+  - [ ] Rock-Paper-Scissors updated to delta-based URLs with checksums
+  - [ ] Both games tested end-to-end after framework changes
+  - [ ] URL format migration tested (old URLs show helpful migration message)
 - [ ] Framework documentation updated with sequential game pattern
+- [ ] Migration guide created for delta-based URL architecture
 
 ### Documentation
 
