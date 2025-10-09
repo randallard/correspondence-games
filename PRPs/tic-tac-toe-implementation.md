@@ -18,7 +18,6 @@
 - Delta URLs 70-80% smaller than full state encoding
 - Checksum verification ensures state integrity
 - `npm run validate` passes with zero errors
-- All existing game features (rematch, history) work
 
 ---
 
@@ -103,7 +102,6 @@
 - [ ] Win detection works for all 8 patterns
 - [ ] Draw detection when board full
 - [ ] Winner/loser messaging correct
-- [ ] Rematch functionality works
 - [ ] Game history saves completed games
 - [ ] All validation commands pass
 - [ ] Prisoner's Dilemma still works
@@ -217,19 +215,14 @@
   critical: Rebuild as grid, but reuse event handling patterns
 
 - file: src/features/game/components/GameResults.tsx
-  why: Results display patterns - adapt for win/draw/rematch
-  pattern: Lines 1-312 - Winner/loser display, rematch button, game summary
+  why: Results display patterns - adapt for win/draw
+  pattern: Lines 1-312 - Winner/loser display, game summary
   gotcha: Conditional rendering based on game phase
 
 - file: src/features/game/utils/encryption.ts
   why: AES encryption for URL state - reuse as-is
   pattern: Lines 1-167 - Full encryption pipeline (AES + HMAC)
   critical: REUSABLE - works with any GameState structure
-
-- file: src/features/game/utils/rematch.ts
-  why: Rematch functionality - embed previous game results
-  pattern: Lines 1-189 - convertGameStateToCompletedGame, createRematchGame
-  gotcha: Rematch inverts player roles (P1 becomes P2)
 
 # MUST READ - Rock-Paper-Scissors Config (Complete Example)
 - file: correspondence-games-framework/games/rock-paper-scissors/games/configs/rock-paper-scissors.yaml
@@ -1513,7 +1506,6 @@ npm run dev
 # 7. Return to P1 tab → open new URL
 # 8. Complete game to win
 # 9. Verify winner message
-# 10. Test rematch functionality
 
 # E2E Tests
 npm run test:e2e
@@ -1574,13 +1566,11 @@ npm run preview
 - [ ] HMAC tamper detection working
 - [ ] URLs 70-80% smaller than before
 - [ ] Game history saves completed games
-- [ ] Rematch functionality works
 
 ### Framework Validation
 
 - [ ] Prisoner's Dilemma updated to delta URLs
 - [ ] Prisoner's Dilemma tested end-to-end (5 rounds)
-- [ ] Prisoner's Dilemma rematch works
 - [ ] Rock-Paper-Scissors updated to delta URLs
 - [ ] Rock-Paper-Scissors tested end-to-end (3 rounds)
 - [ ] Old URL format shows migration message
