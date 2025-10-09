@@ -1,0 +1,321 @@
+library: React Testing (Vitest + Testing Library + Playwright)
+version: Vitest 2.x, React Testing Library 16.x, Playwright 1.49+
+documentation:
+  quickstart: https://vitest.dev/guide/
+  api_reference: https://testing-library.com/docs/react-testing-library/api
+  examples: https://github.com/epicweb-dev/react-component-testing-with-vitest
+
+key_patterns:
+  initialization: |
+    // vitest.config.ts
+    import { defineConfig } from 'vitest/config'
+
+    export default defineConfig({
+      test: {
+        environment: 'happy-dom',
+        globals: true,
+        setupFiles: ['./tests/setup.ts'],
+        coverage: {
+          provider: 'v8',
+          thresholds: { lines: 80, functions: 80, branches: 80, statements: 80 }
+        }
+      }
+    })
+
+  testing_hooks: |
+    import { renderHook, act } from '@testing-library/react'
+
+    it('updates state on move', () => {
+      const { result } = renderHook(() => useGameState())
+
+      act(() => {
+        result.current.makeMove(0)
+      })
+
+      expect(result.current.board[0]).toBe('X')
+      expect(result.current.currentPlayer).toBe('O')
+    })
+
+  testing_components: |
+    import { render, screen } from '@testing-library/react'
+    import userEvent from '@testing-library/user-event'
+
+    it('handles click interactions', async () => {
+      const user = userEvent.setup()
+      render(<TicTacToe />)
+
+      const cell = screen.getByRole('button', { name: /Cell 0/i })
+      await user.click(cell)
+
+      expect(cell).toHaveTextContent('X')
+    })
+
+  testing_localStorage: |
+    // With happy-dom (recommended)
+    import { vi, beforeEach } from 'vitest'
+
+    const getItemSpy = vi.spyOn(localStorage, 'getItem')
+    const setItemSpy = vi.spyOn(localStorage, 'setItem')
+
+    beforeEach(() => {
+      localStorage.clear()
+      getItemSpy.mockClear()
+      setItemSpy.mockClear()
+    })
+
+    it('persists game state', () => {
+      const { result } = renderHook(() => useGameState())
+
+      act(() => {
+        result.current.makeMove(0)
+      })
+
+      expect(setItemSpy).toHaveBeenCalledWith('gameState', expect.any(String))
+    })
+
+  testing_URL_state: |
+    it('loads game from URL', () => {
+      delete window.location
+      window.location = new URL('http://localhost/game/abc123') as any
+
+      render(<Game />)
+
+      expect(screen.getByText(/Game ID: abc123/i)).toBeInTheDocument()
+    })
+
+  e2e_playwright: |
+    import { test, expect } from '@playwright/test'
+
+    test('complete game flow', async ({ page }) => {
+      await page.goto('/game')
+
+      // Make moves
+      await page.locator('[data-testid="cell-0"]').click()
+      await page.locator('[data-testid="cell-3"]').click()
+      await page.locator('[data-testid="cell-1"]').click()
+      await page.locator('[data-testid="cell-4"]').click()
+      await page.locator('[data-testid="cell-2"]').click()
+
+      await expect(page.locator('[data-testid="status"]'))
+        .toHaveText(/Player X wins!/i)
+    })
+
+  page_object_model: |
+    // pages/TicTacToePage.ts
+    export class TicTacToePage {
+      constructor(private page: Page) {}
+
+      async goto() {
+        await this.page.goto('/game')
+      }
+
+      async clickCell(index: number) {
+        await this.page.locator(`[data-testid="cell-${index}"]`).click()
+      }
+
+      async getStatus() {
+        return await this.page.locator('[data-testid="status"]').textContent()
+      }
+    }
+
+  accessibility_testing: |
+    it('is keyboard navigable', async () => {
+      render(<TicTacToe />)
+
+      const cells = screen.getAllByRole('button')
+      cells[0].focus()
+      await userEvent.keyboard('{Enter}')
+
+      expect(cells[0]).toHaveTextContent('X')
+    })
+
+    it('uses proper ARIA roles', () => {
+      render(<TicTacToe />)
+
+      expect(screen.getByRole('grid')).toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+    })
+
+  error_handling: |
+    it('prevents invalid moves', () => {
+      const { result } = renderHook(() => useGameState())
+
+      act(() => {
+        result.current.makeMove(0) // X
+      })
+
+      act(() => {
+        result.current.makeMove(0) // Try same cell
+      })
+
+      // Should still be X, not changed
+      expect(result.current.board[0]).toBe('X')
+      expect(result.current.currentPlayer).toBe('O') // Player didn't switch
+    })
+
+gotchas:
+  - issue: "Test fails with 'not wrapped in act()' warning"
+    solution: "Wrap state updates in act(() => { ... }). Always use act() when calling functions that trigger state changes in hooks."
+
+  - issue: "localStorage spy not working with jsdom"
+    solution: "Use Storage.prototype instead: vi.spyOn(Storage.prototype, 'getItem'). Better: use happy-dom environment where you can spy directly on localStorage."
+
+  - issue: "result.current properties not updating in hook tests"
+    solution: "Don't destructure result.current. Always access via result.current.property to maintain reactivity."
+
+  - issue: "Async tests timing out or flaky"
+    solution: "Use waitFor() instead of setTimeout. Example: await waitFor(() => expect(x).toBe(y), { timeout: 5000 })"
+
+  - issue: "window.location mock not working"
+    solution: "Delete before reassigning: delete window.location; window.location = new URL(...) as any. For complex cases, use vitest-location-mock package."
+
+  - issue: "Tests pass locally but fail in CI"
+    solution: "Ensure clean state between tests. Add cleanup in beforeEach/afterEach. Clear localStorage, restore mocks, use vi.restoreAllMocks()."
+
+  - issue: "Can't test browser-specific behavior (CSS, layout)"
+    solution: "Use Vitest Browser Mode (experimental) or Playwright component testing for real browser rendering."
+
+  - issue: "E2E tests are slow"
+    solution: "Use test.describe.configure({ mode: 'parallel' }). Run critical tests first, use --workers flag, disable animations in test mode."
+
+best_practices:
+  - "Test behavior, not implementation - focus on what users see and do"
+  - "Use role-based queries (getByRole) for better accessibility and maintainability"
+  - "Prefer userEvent over fireEvent for more realistic user interactions"
+  - "Use Page Object Model for E2E tests to centralize selectors and interactions"
+  - "Maintain 80%+ unit test coverage, 95%+ for critical game logic"
+  - "Test accessibility: keyboard navigation, ARIA roles, screen reader announcements"
+  - "Clear state between tests: localStorage, mocks, DOM cleanup"
+  - "Use happy-dom over jsdom for faster tests and simpler localStorage testing"
+  - "Write integration tests for critical user flows, not just isolated units"
+  - "Use property-based testing (fast-check) for complex game logic edge cases"
+  - "Test async operations with waitFor, not arbitrary timeouts"
+  - "Mock external dependencies, but test integration points"
+  - "Use descriptive test names that explain the behavior being tested"
+  - "Group related tests with describe blocks for better organization"
+  - "Run tests in CI/CD on every commit and pull request"
+
+coverage_targets:
+  unit:
+    overall: "80%"
+    game_logic: "95%"
+    utility_functions: "90%"
+  integration:
+    overall: "70-80%"
+    state_management: "80%"
+    persistence: "75%"
+  e2e:
+    scenarios:
+      - "Happy path: Complete game to win"
+      - "Draw scenario: Full board with no winner"
+      - "URL sharing: Create game, share URL, load in new session"
+      - "Invalid moves: Clicking occupied cells, post-game moves"
+      - "Accessibility: Keyboard navigation throughout game"
+    browsers:
+      - "Chrome/Chromium"
+      - "Firefox"
+      - "Safari/WebKit (if targeting Mac/iOS)"
+
+recommended_stack:
+  unit_integration:
+    - "Vitest (test runner)"
+    - "@testing-library/react (component testing)"
+    - "happy-dom (DOM environment)"
+    - "@testing-library/user-event (interactions)"
+  e2e:
+    - "Playwright (cross-browser E2E)"
+    - "Page Object Model pattern"
+  optional:
+    - "fast-check (property-based testing)"
+    - "@axe-core/playwright (accessibility testing)"
+    - "vitest-localstorage-mock (alternative localStorage mocking)"
+
+testing_pyramid:
+  distribution:
+    unit: "70-80%"
+    integration: "15-20%"
+    e2e: "5-10%"
+  rationale: "Unit tests are fast and catch bugs early. Integration tests verify components work together. E2E tests ensure critical user journeys work end-to-end."
+
+vitest_browser_mode:
+  status: "Experimental (2025)"
+  benefits:
+    - "Tests run in real browser (more accurate)"
+    - "Native React Testing Library implementation"
+    - "Better CSS/layout testing"
+    - "Recommended by Kent C. Dodds (RTL author)"
+  drawbacks:
+    - "Slower initialization (spins up browser)"
+    - "Still experimental, API may change"
+  when_to_use: "Complex UI interactions, visual testing, when jsdom/happy-dom limitations are hit"
+
+save_to_ai_docs: true
+
+additional_resources:
+  - title: "Vitest Documentation"
+    url: "https://vitest.dev/guide/"
+    sections: ["Getting Started", "Mocking", "Browser Mode"]
+
+  - title: "React Testing Library Docs"
+    url: "https://testing-library.com/docs/react-testing-library/intro/"
+    sections: ["Guiding Principles", "Queries", "User Interactions", "Async"]
+
+  - title: "Playwright Documentation"
+    url: "https://playwright.dev/docs/intro"
+    sections: ["Writing Tests", "Page Object Models", "Accessibility Testing"]
+
+  - title: "Epic Web - Vitest Browser Mode"
+    url: "https://www.epicweb.dev/events/react-component-testing-with-vitest-browser-mode-02-2025"
+    note: "Modern approach recommended for 2025"
+
+  - title: "fast-check Documentation"
+    url: "https://fast-check.dev/"
+    sections: ["Introduction", "Arbitraries", "Property-Based Testing"]
+
+  - title: "Google Testing Blog - Code Coverage"
+    url: "https://testing.googleblog.com/2020/08/code-coverage-best-practices.html"
+    note: "Industry standards for coverage targets"
+
+quick_start_commands:
+  install: |
+    npm install --save-dev vitest @vitest/ui happy-dom
+    npm install --save-dev @testing-library/react @testing-library/user-event
+    npm install --save-dev @playwright/test
+
+  run_tests: |
+    npm run test              # Run all tests
+    npm run test -- --watch   # Watch mode
+    npm run test -- --coverage  # With coverage
+    npx playwright test       # E2E tests
+
+  scaffold_test: |
+    # Create test file next to component
+    # Component: src/components/Game.tsx
+    # Test: src/components/Game.test.tsx
+
+file_structure:
+  unit_integration: |
+    src/
+      components/
+        Game.tsx
+        Game.test.tsx        # Component tests
+      hooks/
+        useGameState.ts
+        useGameState.test.ts # Hook tests
+      utils/
+        gameLogic.ts
+        gameLogic.test.ts    # Pure function tests
+    tests/
+      setup.ts               # Global test setup
+
+  e2e: |
+    tests/
+      e2e/
+        game.spec.ts         # E2E test specs
+      pages/
+        TicTacToePage.ts     # Page Object Models
+
+migration_notes:
+  from_jest: "Vitest API is Jest-compatible. Most tests work with minimal changes. Update config from jest.config.js to vitest.config.ts."
+  from_cypress: "Playwright offers similar E2E capabilities with better performance. Page Object Model pattern translates well."
+  to_browser_mode: "Start with happy-dom/jsdom for stability. Migrate to Browser Mode when needed for complex UI interactions."
